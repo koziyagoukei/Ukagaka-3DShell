@@ -9,8 +9,32 @@ MenuScript
     _m += "\n\q[あいさつ,OnUk3dGreet]　\q[うなずく,OnUk3dNod]　\q[待機,OnUk3dIdle]"
     _m += "\n\q[止める,OnUk3dStop]　\q[状態,OnUk3dStatus]"
     _m += "\n\q[デスクトップ行動,OnUk3dDesktop]"
+    _m += "\nまばたき　" + FaceSwitch("blink", uk3d.sample.blink) + "　目で追う　" + FaceSwitch("gaze", uk3d.sample.gaze)
     _m += "\n\n[half]\q[メニューを閉じる,OnUk3dCloseMenu]　\q[ゴーストを終了,OnUk3dExit]"
     _m
+}
+
+// まばたき・視線追従の ON/OFF（ランタイムの既定は両方 ON）
+FaceSwitch
+{
+    if _argv[1] == 0 {
+        return "\q[ON,OnUk3dFace," + _argv[0] + ",1]　●OFF"
+    }
+    "●ON　\q[OFF,OnUk3dFace," + _argv[0] + ",0]"
+}
+
+OnUk3dFace
+{
+    if reference[0] == "blink" {
+        uk3d.sample.blink = TOINT(reference[1])
+    }
+    else {
+        uk3d.sample.gaze = TOINT(reference[1])
+    }
+    if Configure3DFace(uk3d.sample.blink, uk3d.sample.gaze) == 0 {
+        return ErrorTalk
+    }
+    Menu("\0\s[0]切り替えました。")
 }
 
 // 選択肢のタイムアウトを無効にしてメニューを出す
@@ -36,6 +60,11 @@ OnBoot
     }
     _ok = Play3DMotion("greet", 0, "idle")
     _ok = Configure3DGrab("grab", "idle", 180)
+    if uk3d.sample.blink == "" {
+        uk3d.sample.blink = 1
+        uk3d.sample.gaze = 1
+    }
+    _ok = Configure3DFace(uk3d.sample.blink, uk3d.sample.gaze)
     Menu("\0\s[0]こんにちは。\w9")
 }
 

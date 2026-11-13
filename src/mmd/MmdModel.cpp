@@ -106,6 +106,7 @@ void MmdModel::loadModel(const std::filesystem::path &inputPath) {
     animator_.reset();
     physics_.reset();
     motion_.reset();
+    motionMorphKeys_.clear();
     physicsStatus_ = PhysicsStatus::notInitialized;
     physicsEnabled_ = false;
     overrides_.clear();
@@ -136,6 +137,13 @@ void MmdModel::loadMotion(const std::filesystem::path &inputPath) {
     animator_->setMotion(motion.get());
     motion_ = std::move(motion);
     motionPath_ = path;
+    // Morph keys by model morph, for the automatic blink (motionMorphWeight).
+    motionMorphKeys_.assign(model_->morphs.size(), {});
+    for (const auto &key : motion_->morphs)
+        if (const auto morph = findMorph(key.name))
+            motionMorphKeys_[*morph].emplace_back(key.frame, key.weight);
+    for (auto &keys : motionMorphKeys_)
+        std::ranges::sort(keys);
     const auto compat = animator_->motionCompatibility();
     log::info("VMD読み込み成功: 対象モデル名=\"{}\" 最終フレーム={} ボーンキー={} モーフキー={} "
               "一致ボーントラック={}/{}",
@@ -149,6 +157,7 @@ void MmdModel::clearMotion() {
     if (animator_)
         animator_->setMotion(nullptr);
     motion_.reset();
+    motionMorphKeys_.clear();
     motionPath_.clear();
 }
 
@@ -209,8 +218,77 @@ void MmdModel::run(float frame, float seconds, bool poseOnly) {
     // attached, libmmd runs: animation -> IK -> kinematic bodies -> Bullet step
     // -> physics bones -> post-physics IK -> skinning, all inside this call.
     // Pose only: the same pipeline without the vertex copy and skinning.
-    animator_->evaluateInto(frame_, frame, seconds, poseOnly, overrides_,
+    mmd::MorphOverrides overrides = overrides_;
+    if ((autoMorph_ && autoMorphWeight_ > 0.0F) || !gazeOffsets_.empty()) {
+        combined_.assign(overrides_.begin(), overrides_.end());
+        if (autoMorph_ && autoMorphWeight_ > 0.0F && !overrideWeight(*autoMorph_)) {
+            mmd::MorphOverride blink;
+            blink.index = *autoMorph_;
+            blink.weight = std::max(autoMorphWeight_, motionMorphWeight(*autoMorph_, frame));
+            blink.type = model_->morphs[*autoMorph_].type;
+            combined_.push_back(blink);
+        }
+        if (!gazeOffsets_.empty()) {
+            mmd::MorphOverride gaze;
+            gaze.index = mmd::MorphOverride::temporary;
+            gaze.weight = 1.0F;
+            gaze.type = 2; // bone offsets
+            gaze.offsets = gazeOffsets_;
+            combined_.push_back(gaze);
+        }
+        overrides = combined_;
+    }
+    animator_->evaluateInto(frame_, frame, seconds, poseOnly, overrides,
                             poseOnly ? mmd::VertexOutput::omitUnchangedGpu : mmd::VertexOutput::full);
+}
+
+std::optional<std::size_t> MmdModel::findMorph(std::string_view name) const {
+    if (!model_ || name.empty())
+        return std::nullopt;
+    for (std::size_t i = 0; i < model_->morphs.size(); ++i)
+        if (model_->morphs[i].name == name || model_->morphs[i].englishName == name)
+            return i;
+    return std::nullopt;
+}
+
+float MmdModel::motionMorphWeight(std::size_t morph, float frame) const {
+    if (morph >= motionMorphKeys_.size() || motionMorphKeys_[morph].empty())
+        return 0.0F;
+    const auto &keys = motionMorphKeys_[morph];
+    if (frame <= static_cast<float>(keys.front().first))
+        return keys.front().second;
+    for (std::size_t i = 1; i < keys.size(); ++i) {
+        if (frame <= static_cast<float>(keys[i].first)) {
+            const float a = static_cast<float>(keys[i - 1].first);
+            const float b = static_cast<float>(keys[i].first);
+            const float t = b > a ? (frame - a) / (b - a) : 1.0F;
+            return keys[i - 1].second + (keys[i].second - keys[i - 1].second) * t;
+        }
+    }
+    return keys.back().second;
+}
+
+std::optional<float> MmdModel::overrideWeight(std::size_t morph) const {
+    for (const auto &entry : overrides_)
+        if (entry.index == morph)
+            return entry.weight;
+    return std::nullopt;
+}
+
+void MmdModel::setAutoMorph(std::optional<std::size_t> morph, float weight) {
+    autoMorph_ = morph;
+    autoMorphWeight_ = std::clamp(weight, 0.0F, 1.0F);
+}
+
+void MmdModel::setGazeRotations(const std::vector<std::pair<std::size_t, mmd::Float4>> &rotations) {
+    gazeOffsets_.clear();
+    for (const auto &[bone, rotation] : rotations) {
+        mmd::PmxMorphOffset offset;
+        offset.index = static_cast<std::int32_t>(bone);
+        offset.vector3 = {0.0F, 0.0F, 0.0F};
+        offset.vector4 = rotation;
+        gazeOffsets_.push_back(offset);
+    }
 }
 
 const mmd::AnimatedModelFrame &MmdModel::evaluate(float frame, float seconds) {

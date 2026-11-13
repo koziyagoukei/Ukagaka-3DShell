@@ -13,7 +13,7 @@ namespace uka3d::saori {
 namespace {
 
 #ifndef UKA3D_VERSION
-#define UKA3D_VERSION "0.1.0-beta"
+#define UKA3D_VERSION "0.1.1-beta"
 #endif
 constexpr const char *kVersion = "ukagaka3d_saori/" UKA3D_VERSION;
 
@@ -167,6 +167,12 @@ void SaoriBridge::loadConfig() {
     if (const auto it = json.find("fps"); it != json.end() && it->is_number_integer())
         config_.fps = it->get<int>();
     config_.physics = json.value("physics", config_.physics);
+    if (const auto it = json.find("face"); it != json.end() && it->is_object()) {
+        config_.blink = it->value("blink", config_.blink);
+        config_.blinkMorph = it->value("blinkMorph", config_.blinkMorph);
+        config_.gaze = it->value("gaze", config_.gaze);
+        config_.gazeRadius = std::clamp(it->value("gazeRadius", config_.gazeRadius), 0.0, 10000.0);
+    }
     config_.shutdownOnUnload = json.value("shutdownOnUnload", config_.shutdownOnUnload);
     if (const auto it = json.find("timeouts"); it != json.end() && it->is_object()) {
         config_.launchTimeoutMs = std::clamp(it->value("launchMs", 5000u), 500u, 30000u);
@@ -283,6 +289,14 @@ SaoriResponse SaoriBridge::launch(const std::vector<std::string> &args) {
         add(L"--follow-window-class");
         add(utf8ToWide(config_.followWindowClass));
     }
+    add(config_.blink ? L"--blink" : L"--no-blink");
+    if (!config_.blinkMorph.empty()) {
+        add(L"--blink-morph");
+        add(utf8ToWide(config_.blinkMorph));
+    }
+    add(config_.gaze ? L"--gaze" : L"--no-gaze");
+    add(L"--gaze-radius");
+    add(std::to_wstring(static_cast<int>(config_.gazeRadius)));
     add(L"--fit");
     add(config_.fit == "height" ? L"height" : L"all");
     add(L"--zoom");
@@ -554,6 +568,17 @@ SaoriResponse SaoriBridge::execute(const std::vector<std::string> &arguments) {
                 return fail(error, ipc::error::forbiddenPath);
             params["next"] = {{"path", pathToUtf8(*next)}, {"loop", true}};
         }
+        // Argument4: camera track. Empty = <motion>.camera.json next to the VMD if
+        // there is one, "none" (or 0) = no camera move, otherwise a .camera.json path.
+        const std::string camera = arg(4);
+        if (camera == "none" || camera == "0") {
+            params["camera"] = false;
+        } else if (!camera.empty()) {
+            const auto cameraPath = resolvePath(camera, false, error);
+            if (!cameraPath)
+                return fail(error, ipc::error::forbiddenPath);
+            params["camera"] = pathToUtf8(*cameraPath);
+        }
         return forward("play_motion", params, config_.loadTimeoutMs);
     }
     if (command == "stop_motion")
@@ -569,6 +594,29 @@ SaoriResponse SaoriBridge::execute(const std::vector<std::string> &arguments) {
                 return fail("ウェイトは 0〜1 の数値で指定してください: " + text, ipc::error::invalidParams);
         }
         return forward("set_morph", {{"name", arg(1)}, {"weight", weight}}, config_.requestTimeoutMs);
+    }
+    if (command == "configure_face") {
+        // configure_face [blink 1/0] [gaze 1/0] [gazeRadius px] [blinkMorph]; empty = unchanged
+        ipc::Json params = ipc::Json::object();
+        for (const auto &[index, key] : {std::pair<std::size_t, const char *>{1, "blink"}, {2, "gaze"}}) {
+            if (arg(index).empty())
+                continue;
+            const auto value = parseBool(arg(index));
+            if (!value)
+                return fail(std::string(key) + " は 1 / 0 で指定してください", ipc::error::invalidParams);
+            params[key] = *value;
+        }
+        if (!arg(3).empty()) {
+            double radius = 0.0;
+            const std::string text = arg(3);
+            const auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), radius);
+            if (ec != std::errc{} || ptr != text.data() + text.size() || radius < 0.0)
+                return fail("gazeRadius は 0 以上の数値です（0 = 自動）", ipc::error::invalidParams);
+            params["gazeRadius"] = radius;
+        }
+        if (!arg(4).empty())
+            params["blinkMorph"] = arg(4);
+        return forward("configure_face", params, config_.requestTimeoutMs);
     }
     if (command == "set_morphs") {
         // set_morphs <reset 1/0> <name> <weight> [<name> <weight> ...]

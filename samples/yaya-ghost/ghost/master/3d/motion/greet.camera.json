@@ -1,0 +1,9 @@
+{
+    "version": 1,
+    "keys": [
+        { "frame": 0 },
+        { "frame": 20, "focusBone": "頭", "focusOffset": [0, -1.2, -0.5], "zoom": 1.4, "yaw": -6 },
+        { "frame": 70, "focusBone": "頭", "focusOffset": [0, -1.2, -0.5], "zoom": 1.45, "yaw": -6 },
+        { "frame": 90 }
+    ]
+}

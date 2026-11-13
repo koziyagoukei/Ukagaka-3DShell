@@ -4,7 +4,7 @@
 デスクトップに透過ウィンドウで 3D キャラクターを表示し、SSP の会話・メニューと連動させます。
 無料・非営利のオープンソースプロジェクトで、ライセンスは MIT です。
 
-> **v0.1.0-beta（ベータ版）です。** 作者の環境で確認した範囲で公開しています。
+> **v0.1.1-beta（ベータ版）です。** 作者の環境で確認した範囲で公開しています。
 > 確認できていない環境や操作があります。下の「対応状況」と「既知の制限」を読んでからお使いください。
 
 ![サンプルゴーストのうかが窓の上端に座り、SSP のバルーンにメニューが出ている画面](docs/images/screenshot-uka.png)
@@ -18,7 +18,9 @@
 - SSP との連携：YAYA 6 の辞書から SAORI 経由でモーション・表情・移動を操作
 - モデルのクリック・ダブルクリック・なで・長押しドラッグを、部位名つきのイベントとしてゴーストに通知
 - デスクトップを歩く、手前の窓の上端に座る（窓の移動に追従）、自律行動、画面をまたぐ移動
-- モデルの脚と腕を測って、待機・歩行・着席・つまみのモーションを自動で作るツール（`uka3d_motiongen`）
+- モデルの脚と腕を測って、待機・歩行・着席・つまみのモーションを自動で作るツール（`uka3d_motiongen`）。長いスカート向けの小さい歩幅にも対応
+- モーションに合わせてカメラが寄る・回り込む（`.camera.json`、または MMD のカメラモーション `.camera.vmd`）。動くのはカメラだけで、物理演算には影響しません
+- 自動まばたきと、マウスが近づくと目と顔で追う視線追従
 
 ## 対応状況
 
@@ -38,7 +40,10 @@
 | Windows 10、ほかの GPU、VC++ ランタイムのない Windows | 🟡 | 作者の Windows 11 の 1 台でのみ確認。ランタイムは静的リンクで、依存 DLL は OS 標準のものだけです |
 | 高 DPI（125%／150% 以外） | 🟡 | DPI ごとの拡大縮小は実装済み |
 | PMD、VRM、ソフトボディ | ❌ | VRM は[調査のみ](docs/vrm-investigation.md) |
-| Uka3D 互換、視線追従、リップシンク | ❌ | |
+| カメラトラック（JSON） | ✅ | SSP で、ボーンを追う寄り・回り込み・モーション切り替え時のつなぎを確認 |
+| MMD のカメラモーション（`.camera.vmd`） | 🟡 | 距離・注視点・上下の回転・視野角は MMD 製のカメラで確認。**左右の回り込みと傾き（ロール）の向きは MMD 本体と見比べていません** |
+| 自動まばたき・視線追従 | ✅（合成入力） | CG-CA Uka 以外の 3 モデルで確認。視線はカーソルを**自動で動かして**確認 |
+| Uka3D 互換、リップシンク | ❌ | |
 
 細かい検証結果と未確認の項目は [docs/progress.md](docs/progress.md) にあります。
 
@@ -126,7 +131,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Test
 # サンプルゴーストを組み立てる（YAYA 6 の yaya.dll と LICENSE を用意しておく）
 powershell -ExecutionPolicy Bypass -File scripts\package-ghost.ps1 -YayaDll C:\path\to\yaya.dll -Nar
 # 配布ファイル一式（NAR、ランタイム、テンプレート、SHA-256）を作る
-powershell -ExecutionPolicy Bypass -File scripts\make-release.ps1 -YayaDll C:\path\to\yaya.dll -Label 0.1.0-beta
+powershell -ExecutionPolicy Bypass -File scripts\make-release.ps1 -YayaDll C:\path\to\yaya.dll -Label 0.1.1-beta
 ```
 
 詳しくは [docs/build.md](docs/build.md)、設計は [docs/architecture.md](docs/architecture.md)、ランタイム単体のコマンドラインは `ukagaka3d.exe --help` を参照してください。

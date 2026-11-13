@@ -13,7 +13,7 @@
 #include <windows.h>
 
 #ifndef UKA3D_VERSION
-#define UKA3D_VERSION "0.1.0-beta"
+#define UKA3D_VERSION "0.1.1-beta"
 #endif
 
 #include <cstring>

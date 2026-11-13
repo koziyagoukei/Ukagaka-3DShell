@@ -2,7 +2,13 @@
 // and checks them (foot sliding, mesh below the floor).
 //
 //   uka3d_motiongen <model.pmx> <outDir> [--speed px/s] [--width px] [--height px] [--fit height|all]
-//                   [--check] [--compare <dir with walk.vmd / idle.vmd>]
+//                   [--step ratio] [--lift ratio] [--start-crossing] [--check] [--compare <dir>]
+//
+// --step is the step length / leg length (default 0.5); --lift the swing foot's
+// clearance / leg length (default 0.055). Long skirts and robes stay down with
+// small steps and a low lift, e.g. --speed 110 --step 0.28 --lift 0.03 --start-crossing
+// (--start-crossing begins the loop with the legs passing each other, so the
+// step out of standing does not throw the skirt).
 //
 // --speed/--width/--height describe the 3D window at 96 dpi (defaults: the
 // sample ghost, 180 px/s in a 384x682 window). The walk cycle is timed so the
@@ -76,14 +82,14 @@ int wmain(int argc, wchar_t **argv) {
     SetConsoleOutputCP(CP_UTF8);
     if (argc < 3) {
         std::fputs("usage: uka3d_motiongen <model.pmx> <outDir> [--speed px/s] [--width px] [--height px] "
-                   "[--fit height|all] [--check] [--compare <dir>]\n",
+                   "[--fit height|all] [--step ratio] [--lift ratio] [--start-crossing] [--check] [--compare <dir>]\n",
                    stderr);
         return 1;
     }
     const fs::path modelPath = argv[1];
     const fs::path outDir = argv[2];
-    float speed = 180.0F, width = 384.0F, height = 682.0F;
-    bool fitHeight = true, doCheck = false;
+    float speed = 180.0F, width = 384.0F, height = 682.0F, step = 0.5F, lift = 0.055F;
+    bool fitHeight = true, doCheck = false, startCrossing = false;
     fs::path compareDir;
     for (int i = 3; i < argc; ++i) {
         const std::wstring arg = argv[i];
@@ -93,12 +99,18 @@ int wmain(int argc, wchar_t **argv) {
         };
         if (arg == L"--speed")
             number(speed);
+        else if (arg == L"--step")
+            number(step);
+        else if (arg == L"--lift")
+            number(lift);
         else if (arg == L"--width")
             number(width);
         else if (arg == L"--height")
             number(height);
         else if (arg == L"--fit" && i + 1 < argc)
             fitHeight = std::wstring(argv[++i]) != L"all";
+        else if (arg == L"--start-crossing")
+            startCrossing = true;
         else if (arg == L"--check")
             doCheck = true;
         else if (arg == L"--compare" && i + 1 < argc)
@@ -115,7 +127,9 @@ int wmain(int argc, wchar_t **argv) {
         // Time the walk so the feet keep pace with the window.
         const float ppu = pixelsPerUnit(model, width, height, fitHeight);
         const float unitsPerSecond = speed / std::max(1e-3F, ppu);
-        const auto params = motion::fitWalk(rig, unitsPerSecond);
+        auto params = motion::fitWalk(rig, unitsPerSecond, step);
+        params.lift = lift;
+        params.startCrossing = startCrossing;
         motion::WalkInfo info;
         const auto walk = motion::makeWalk(rig, params, info);
         std::printf("walk: %u frames (%.2f s), step %.2f x leg, stride %.2f units, %.2f units/s = %.0f px/s at 96 dpi "

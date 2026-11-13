@@ -54,6 +54,11 @@ struct WalkParams {
     std::uint32_t frames{30}; // one cycle (two steps) at 30 fps
     float stepRatio{0.5F};    // step length / leg length
     float stance{0.6F};       // part of the cycle a foot is on the ground
+    float lift{0.055F};       // swing foot clearance / leg length
+    // Where the loop starts in the gait cycle. false: left heel strike (feet
+    // furthest apart). true: the legs passing each other, so the cross-fade
+    // from standing does not spread the legs suddenly (calmer skirts).
+    bool startCrossing{false};
 };
 
 struct WalkInfo {
@@ -63,7 +68,9 @@ struct WalkInfo {
 };
 
 // Cycle length and step for a walk whose planted foot moves at `unitsPerSecond`.
-[[nodiscard]] WalkParams fitWalk(const Rig &rig, float unitsPerSecond);
+// `stepRatio` is the preferred step (step length / leg length): smaller steps
+// keep long skirts and robes down; the cycle gets longer instead.
+[[nodiscard]] WalkParams fitWalk(const Rig &rig, float unitsPerSecond, float stepRatio = 0.5F);
 
 [[nodiscard]] mmd::VmdMotion makeIdle(const Rig &rig);
 [[nodiscard]] mmd::VmdMotion makeWalk(const Rig &rig, const WalkParams &params, WalkInfo &info);

@@ -44,7 +44,8 @@ XMFLOAT3 Camera::eye() const {
 
 XMMATRIX Camera::view() const {
     const XMFLOAT3 e = eye();
-    return XMMatrixLookAtLH(XMLoadFloat3(&e), XMLoadFloat3(&target), XMVectorSet(0.0F, 1.0F, 0.0F, 0.0F));
+    const XMMATRIX lookAt = XMMatrixLookAtLH(XMLoadFloat3(&e), XMLoadFloat3(&target), XMVectorSet(0.0F, 1.0F, 0.0F, 0.0F));
+    return roll == 0.0F ? lookAt : XMMatrixMultiply(lookAt, XMMatrixRotationZ(roll));
 }
 
 XMMATRIX Camera::projection(float aspect) const {

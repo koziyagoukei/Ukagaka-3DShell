@@ -35,6 +35,11 @@ struct Options {
     // Camera framing: fit the whole model ("all") or only its height ("height").
     bool fitHeight{false};
     float zoom{1.0F}; // >1 = closer
+    // Automatic face: blinking and following the cursor with the eyes/head.
+    bool blink{true};
+    std::string blinkMorph; // empty: まばたき / 瞬き / blink
+    bool gaze{true};
+    float gazeRadius{0.0F}; // reaction distance from the head (96-dpi px); 0 = automatic
     // Development / automated verification
     double exitAfterSeconds{0.0};       // >0: exit automatically after this many seconds
     std::filesystem::path capturePath; // non-empty: save the last frame as PNG on exit

@@ -30,6 +30,7 @@ class Camera {
     float fovY{DirectX::XMConvertToRadians(30.0F)};
     float yaw{0.0F};
     float pitch{0.0F};
+    float roll{0.0F}; // around the view direction (+ = the image turns counter-clockwise)
     // Shifts the rendered image without moving the camera, in normalised device
     // units (+x right, +y up; 2 = full width/height). Applied by projection(),
     // so project() and ray() stay consistent with what is drawn.

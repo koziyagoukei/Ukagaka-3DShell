@@ -14,10 +14,13 @@
 //   Load3DModel("3d/model/xxx.pmx")    モデルを読み替える
 //   Play3DMotion("idle")               3d/motion/idle.vmd をループ再生
 //   Play3DMotion("greet", 0, "idle")   1 回再生して、終わったら idle をループ再生
+//   Play3DMotion("greet", 0, "idle", "none")   カメラトラック（greet.camera.json）を使わない
 //   Stop3DMotion()                     モーション停止（基本姿勢、物理は継続）
 //   Set3DMorph("笑い", 1.0)            モーフ（表情）の重みを 0〜1 で設定
 //   Reset3DMorph()  / Reset3DMorph("笑い")
 //   Status3D()                         uk3d.value に running / stopped、uk3d.detail に JSON
+//   Configure3DFace(1, 1)              自動まばたき・視線追従の ON/OFF（省略・空は変更なし）
+//   Configure3DFace("", "", 200)       視線が反応する頭からの距離（96dpi px、0 = 自動）
 //   Shutdown3D()                       3D ランタイムを終了
 //
 // パスはゴーストのフォルダ（ghost/master）からの相対パス。フォルダの外は指定できない。
@@ -90,6 +93,9 @@ Load3DModel
 
 Play3DMotion
 {
+    if _argc >= 4 {
+        return Call3D("play_motion", _argv[0], _argv[1], _argv[2], _argv[3])
+    }
     if _argc >= 3 {
         return Call3D("play_motion", _argv[0], _argv[1], _argv[2])
     }
@@ -118,6 +124,11 @@ Reset3DMorph
         return Call3D("reset_morph", _argv[0])
     }
     return Call3D("reset_morph")
+}
+
+Configure3DFace
+{
+    return Call3D("configure_face", _argv[0], _argv[1], _argv[2], _argv[3])
 }
 
 Status3D

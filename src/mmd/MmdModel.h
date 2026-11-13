@@ -71,6 +71,19 @@ class MmdModel {
     bool resetMorph(const std::string &name);
     [[nodiscard]] std::vector<std::pair<std::string, float>> morphOverrides() const;
 
+    // ---- Automatic face (blink, gaze) -------------------------------------------
+    [[nodiscard]] std::optional<std::size_t> findMorph(std::string_view name) const;
+    // The weight the current motion gives a morph at `frame` (VMD morph keys are
+    // linear); 0 without a motion or keys.
+    [[nodiscard]] float motionMorphWeight(std::size_t morph, float frame) const;
+    // The expression override for a morph, if there is one.
+    [[nodiscard]] std::optional<float> overrideWeight(std::size_t morph) const;
+    // Added on every evaluation: an automatic morph weight (the blink), used as
+    // the larger of it and the motion's weight unless an expression overrides
+    // that morph, and gaze rotations multiplied onto bones before IK and physics.
+    void setAutoMorph(std::optional<std::size_t> morph, float weight);
+    void setGazeRotations(const std::vector<std::pair<std::size_t, mmd::Float4>> &rotations);
+
     [[nodiscard]] bool loaded() const noexcept {
         return model_ != nullptr;
     }
@@ -147,6 +160,12 @@ class MmdModel {
     bool physicsEnabled_{false};
     std::vector<mmd::PhysicsTransform> savedBodies_;
     std::vector<mmd::MorphOverride> overrides_;
+    std::vector<std::vector<std::pair<std::uint32_t, float>>> motionMorphKeys_; // per model morph
+    std::optional<std::size_t> autoMorph_;
+    float autoMorphWeight_{0.0F};
+    float autoMorphFrame_{0.0F};
+    std::vector<mmd::PmxMorphOffset> gazeOffsets_;
+    std::vector<mmd::MorphOverride> combined_;
     std::filesystem::path modelPath_;
     std::filesystem::path motionPath_;
     mmd::AnimatedModelFrame frame_;

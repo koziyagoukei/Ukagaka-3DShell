@@ -12,7 +12,7 @@
   Nothing is uploaded or published.
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File scripts\make-release.ps1 -YayaDll ..\yaya\yaya.dll -Label 0.1.0-beta-rc1
+  powershell -ExecutionPolicy Bypass -File scripts\make-release.ps1 -YayaDll ..\yaya\yaya.dll -Label 0.1.1-beta
 #>
 param(
     [Parameter(Mandatory = $true)][string]$YayaDll,

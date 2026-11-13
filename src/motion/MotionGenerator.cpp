@@ -320,15 +320,16 @@ FootPoints footPoints(const Rig &rig, bool left) {
     return points;
 }
 
-WalkParams fitWalk(const Rig &rig, float unitsPerSecond) {
+WalkParams fitWalk(const Rig &rig, float unitsPerSecond, float stepRatio) {
     WalkParams params;
+    params.stepRatio = std::clamp(stepRatio, 0.15F, 0.75F);
     unitsPerSecond = std::max(unitsPerSecond, 1e-3F);
     // Natural step first, then the cycle length that matches the speed, then
     // the step that matches exactly with that whole number of frames.
     const float stride = 2.0F * params.stepRatio * rig.legLength;
-    params.frames = static_cast<std::uint32_t>(std::clamp(std::lround(stride / unitsPerSecond * 30.0F), 20L, 48L));
+    params.frames = static_cast<std::uint32_t>(std::clamp(std::lround(stride / unitsPerSecond * 30.0F), 20L, 60L));
     params.stepRatio = std::clamp(unitsPerSecond * static_cast<float>(params.frames) / 30.0F / (2.0F * rig.legLength),
-                                  0.25F, 0.75F);
+                                  0.15F, 0.75F);
     return params;
 }
 
@@ -413,9 +414,11 @@ mmd::VmdMotion makeWalk(const Rig &rig, const WalkParams &params, WalkInfo &info
     const float travel = stance * stride; // contact point travel during one stance
     info = {seconds, stride, stride / seconds};
 
-    constexpr float strikeDeg = 16.0F; // toes up at heel strike
-    constexpr float pushDeg = 26.0F;   // heel up at toe off
-    const float clearance = 0.055F * rig.legLength;
+    // Shorter steps roll the foot less (and bend the knee less).
+    const float roll = std::clamp(params.stepRatio / 0.5F, 0.4F, 1.2F);
+    const float strikeDeg = 16.0F * roll; // toes up at heel strike
+    const float pushDeg = 26.0F * roll;   // heel up at toe off
+    const float clearance = std::clamp(params.lift, 0.01F, 0.15F) * rig.legLength;
 
     const auto planted = [&](const Leg &leg, float s) {
         const float a = leg.ankleHeight, b = leg.ball, c = leg.heel;
@@ -456,18 +459,23 @@ mmd::VmdMotion makeWalk(const Rig &rig, const WalkParams &params, WalkInfo &info
 
     // Hip height: as high as both legs allow, dipping at double support.
     const float bob = 0.012F * rig.legLength;
-    const auto wave = [&](std::uint32_t frame) {
-        return std::cos(4.0F * kPi * static_cast<float>(frame) / static_cast<float>(frames));
+    // Gait phase of a frame. With startCrossing the loop begins with the left
+    // foot flat under the hip and the right foot passing it.
+    const float phase0 = params.startCrossing ? 0.5F * stance : 0.0F;
+    const auto phaseOf = [&](std::uint32_t frame) {
+        const float t = static_cast<float>(frame % frames) / static_cast<float>(frames) + phase0;
+        return t - std::floor(t);
     };
+    const auto wave = [&](float t) { return std::cos(4.0F * kPi * t); };
     float base = -bob;
     for (std::uint32_t frame = 0; frame < frames; ++frame) {
-        const float t = static_cast<float>(frame) / static_cast<float>(frames);
+        const float t = phaseOf(frame);
         for (const auto &[leg, offset] : {std::pair{&rig.left, 0.0F}, std::pair{&rig.right, 0.5F}}) {
             const FootState state = foot(*leg, t + offset);
             const float reach = (leg->thighLength + leg->shinLength) * 0.992F;
             const float df = state.forward - leg->hipForward;
             const float allowed = state.up + std::sqrt(std::max(0.0F, reach * reach - df * df)) - leg->hipUp;
-            base = std::min(base, allowed + bob * wave(frame));
+            base = std::min(base, allowed + bob * wave(t));
         }
     }
     const bool canDrop = !rig.center.empty();
@@ -475,8 +483,8 @@ mmd::VmdMotion makeWalk(const Rig &rig, const WalkParams &params, WalkInfo &info
     Builder builder(frames);
     builder.legIk(false);
     for (std::uint32_t frame = 0; frame <= frames; ++frame) {
-        const float t = static_cast<float>(frame % frames) / static_cast<float>(frames);
-        const float drop = canDrop ? base - bob * wave(frame % frames) : 0.0F;
+        const float t = phaseOf(frame);
+        const float drop = canDrop ? base - bob * wave(t) : 0.0F;
         if (canDrop)
             builder.key(rig.center, frame, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, drop, 0.0F});
         for (const auto &[leg, offset] : {std::pair{&rig.left, 0.0F}, std::pair{&rig.right, 0.5F}}) {

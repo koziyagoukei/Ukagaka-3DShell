@@ -58,7 +58,7 @@ Value1: {"model":{...},"motion":{...},...}
 
 - **Charset**：`UTF-8` か `Shift_JIS`（CP932）に対応します。応答は要求と同じ文字コードで返します。Charset ヘッダーがない場合は、UTF-8 として正しく読めれば UTF-8、読めなければ Shift_JIS とみなします。
 - **SecurityLevel**：ヘッダーで `Local` 以外が指定されていれば `400 Bad Request` で拒否します。省略した要求も受け付けます。
-- **GET Version SAORI/1.0**：`200 OK`。Result にバージョン（例：`ukagaka3d_saori/0.1.0-beta`）を返します。
+- **GET Version SAORI/1.0**：`200 OK`。Result にバージョン（例：`ukagaka3d_saori/0.1.1-beta`）を返します。
 - **要求行が不正なとき**：`400 Bad Request`（Result に理由）。
 - **Result の約束事**：コマンドが成功すれば `1`、失敗すれば `0` です。
   - `Value0`：メッセージ、または主な値
@@ -72,7 +72,8 @@ Value1: {"model":{...},"motion":{...},...}
 | `launch` | [モデル] | 3D ランタイムを起動して接続する。モデルを省略すると `ukagaka3d.json` の `model` を使う。起動済みなら `Value0=already_running` |
 | `status` | — | `Value0` に状態（`running` / `stopped` / `starting` / `unresponsive`）、`Value1` に状態の JSON |
 | `load_model` | モデル | PMX を読み替える。失敗したときは前のモデルのまま |
-| `play_motion` | モーション [loop] [次のモーション] | VMD を再生する。loop は `1`（既定）か `0`。`0` で次のモーションを指定すると、再生が終わったあとそれをループ再生する |
+| `configure_face` | [まばたき 1/0] [視線 1/0] [反応距離 px] [まばたきのモーフ] | 自動まばたきと視線追従の設定。空の引数は変更なし |
+| `play_motion` | モーション [loop] [次のモーション] [カメラ] | VMD を再生する。loop は `1`（既定）か `0`。`0` で次のモーションを指定すると、再生が終わったあとそれをループ再生する。カメラは省略時、VMD と同じ名前の `.camera.json` があればそれを使う。`none` でカメラを動かさない。ファイルを指定することもできる |
 | `stop_motion` | — | モーションを止めて基本姿勢にする（物理演算は続く） |
 | `set_morph` | モーフ名 [重み] | 表情モーフの重みを 0〜1 で設定する（既定 1.0） |
 | `set_morphs` | reset 名前 重み [名前 重み …] | 複数のモーフを一度に設定する。reset が `1` なら先にすべて戻す。モデルにないモーフは無視する（`missingMorphs` に記録） |
@@ -183,7 +184,8 @@ SAORI は SSP の UI スレッドから同期的に呼ばれます。そこで�
 | `ping` | — | `{"pong":true,"pid":..}` |
 | `status` | — | 状態の JSON（下記） |
 | `load_model` | `path` | 状態 |
-| `play_motion` | `path`, `loop`（既定 true）, `next`（{path, loop}） | 状態 |
+| `play_motion` | `path`, `loop`（既定 true）, `next`（{path, loop, camera}）, `camera`（パスか false。省略時は隣の `.camera.json`） | 状態（`motion.camera` に使用中のカメラトラック） |
+| `configure_face` | `blink`（bool）, `gaze`（bool）, `gazeRadius`（96dpi px、0 = 自動）, `blinkMorph`（モーフ名）。省略した項目は変更なし | `face`（blink, blinkMorph, gaze, gazeRadius, gazeWeight） |
 | `stop_motion` | — | 状態 |
 | `set_morph` | `name`, `weight`（既定 1） | 状態 |
 | `set_morphs` | `weights`（{名前: 重み}）, `reset`（既定 true） | 状態と `missingMorphs` |

@@ -19,6 +19,9 @@
     //   yaw          着席中の向き（度）、inset 窓の角からの距離（96dpi でのピクセル）
     //   transitionMs 着席・立ち上がりの遷移時間（0 で瞬時）
     "seat": { "offsetX": 0.0, "offsetY": 0.4, "yaw": 20, "inset": 40, "transitionMs": 350 },
+    // face: 自動まばたきと、マウスが頭の近くに来たときに目と顔で追う（どちらも既定で ON）。
+    //   gazeRadius は反応する頭からの距離（96dpi でのピクセル、0 = ウィンドウの高さの 6 割）
+    "face": { "blink": true, "gaze": true, "gazeRadius": 0 },
     "fps": 60,
     "physics": true,
     "timeouts": { "launchMs": 5000, "requestMs": 3000, "loadMs": 10000 },

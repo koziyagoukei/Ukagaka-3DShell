@@ -96,6 +96,26 @@ ParseResult parseCommandLine(std::span<const std::wstring_view> args) {
             if (!value || ec != std::errc{} || ptr != text.data() + text.size() || zoom < 0.2F || zoom > 5.0F)
                 return fail("--zoom には 0.2〜5 の数値を指定してください");
             opt.zoom = zoom;
+        } else if (name == "--blink" || name == "--no-blink" || name == "--gaze" || name == "--no-gaze") {
+            if (rejectValue())
+                return fail(std::format("{} は値を取りません", name));
+            if (name == "--blink" || name == "--no-blink")
+                opt.blink = name == "--blink";
+            else
+                opt.gaze = name == "--gaze";
+        } else if (name == "--blink-morph") {
+            const auto value = takeValue();
+            if (!value || value->empty())
+                return fail("--blink-morph にはモーフ名が必要です");
+            opt.blinkMorph = wideToUtf8(*value);
+        } else if (name == "--gaze-radius") {
+            const auto value = takeValue();
+            const std::string text = value ? wideToUtf8(*value) : std::string();
+            float radius = -1.0F;
+            const auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), radius);
+            if (!value || ec != std::errc{} || ptr != text.data() + text.size() || radius < 0.0F || radius > 10000.0F)
+                return fail("--gaze-radius には 0〜10000 のピクセル数を指定してください（0 = 自動）");
+            opt.gazeRadius = radius;
         } else if (name == "--parent-pid") {
             const auto value = takeValue();
             const auto number = value ? parseInt(*value) : std::nullopt;
@@ -179,7 +199,7 @@ ParseResult parseCommandLine(std::span<const std::wstring_view> args) {
 }
 
 #ifndef UKA3D_VERSION
-#define UKA3D_VERSION "0.1.0-beta"
+#define UKA3D_VERSION "0.1.1-beta"
 #endif
 
 std::string usageText() {
@@ -198,6 +218,10 @@ std::string usageText() {
   --loop            モーションをループ再生（既定）
   --no-loop         モーションを最終フレームで停止
   --topmost         常に最前面に表示
+  --no-blink        自動まばたきをしない（既定はする。モーフ「まばたき」など）
+  --blink-morph <名前>  まばたきに使うモーフ
+  --no-gaze         マウスを目で追わない（既定は近くに来たら目と頭を向ける）
+  --gaze-radius <px>  視線が反応する頭からの距離（96dpi 換算、0 = 自動）
   --fit <all|height>  初期カメラ: モデル全体を収める（既定）/ 身長に合わせて大きく表示
   --zoom <倍率>     カメラの寄り（1 = 既定、2 = 2 倍に拡大）
   --fps <n>         描画フレームレートの上限（30 / 60 / 120 など 10〜240、または unlimited。既定 60）

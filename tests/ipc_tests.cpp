@@ -372,9 +372,46 @@ void testBridge() {
     CHECK(bridge.execute({"play_motion", "C:\\Windows\\win.ini"}).values[1] == ipc::error::forbiddenPath);
     CHECK(bridge.execute({"play_motion", "存在しない"}).result == "0");
     CHECK(bridge.execute({"play_motion", "うなずき", "maybe"}).values[1] == ipc::error::invalidParams);
+
+    // Camera tracks: the sidecar next to the VMD is used automatically, "none" skips it,
+    // an explicit broken file fails the request, a broken sidecar only drops the camera.
+    {
+        const fs::path motionDir = ghost / L"3d" / L"motion";
+        std::ofstream(motionDir / L"うなずき.camera.json", std::ios::binary)
+            << R"({"version":1,"keys":[{"frame":0},{"frame":20,"focusBone":"頭","zoom":1.5,"yaw":-10},{"frame":40}]})";
+        std::ofstream(motionDir / L"壊れた.camera.json", std::ios::binary) << R"({"keys":[{"zoom":2}]})";
+        std::ofstream(motionDir / L"挨拶.camera.json", std::ios::binary) << "{ not json";
+        CHECK(bridge.execute({"play_motion", "うなずき"}).result == "1");
+        status = statusOf(bridge);
+        CHECK(status.is_object() && status["motion"]["camera"].is_string() &&
+              status["motion"]["camera"].get<std::string>().find("うなずき.camera.json") != std::string::npos);
+        CHECK(bridge.execute({"play_motion", "うなずき", "1", "", "none"}).result == "1");
+        status = statusOf(bridge);
+        CHECK(status.is_object() && status["motion"]["camera"].is_null());
+        r = bridge.execute({"play_motion", "うなずき", "1", "", "3d/motion/壊れた.camera.json"});
+        CHECK(r.result == "0" && r.values[1] == ipc::error::loadFailed);
+        CHECK(bridge.execute({"play_motion", "うなずき", "1", "", "C:\\Windows\\win.ini"}).values[1] ==
+              ipc::error::forbiddenPath);
+        CHECK(bridge.execute({"play_motion", "挨拶"}).result == "1"); // broken sidecar: motion only
+        status = statusOf(bridge);
+        CHECK(status.is_object() && status["motion"]["camera"].is_null() &&
+              status["motion"]["path"].get<std::string>().find("挨拶.vmd") != std::string::npos);
+        fs::remove(motionDir / L"挨拶.camera.json");
+    }
     CHECK(bridge.execute({"stop_motion"}).result == "1");
     status = statusOf(bridge);
     CHECK(status.is_object() && status["motion"].is_null());
+
+    // Automatic face: defaults on, switched through the bridge, reported in status.
+    status = statusOf(bridge);
+    CHECK(status.is_object() && status["face"]["blink"] == true && status["face"]["gaze"] == true);
+    CHECK(bridge.execute({"configure_face", "0", "", "150"}).result == "1");
+    status = statusOf(bridge);
+    CHECK(status.is_object() && status["face"]["blink"] == false && status["face"]["gaze"] == true &&
+          status["face"]["gazeRadius"] == 150.0);
+    CHECK(bridge.execute({"configure_face", "maybe"}).values[1] == ipc::error::invalidParams);
+    CHECK(bridge.execute({"configure_face", "", "", "-5"}).values[1] == ipc::error::invalidParams);
+    CHECK(bridge.execute({"configure_face", "1", "0", "0"}).result == "1");
 
     // 9) morphs
     CHECK(bridge.execute({"set_morph", "笑い", "1.0"}).result == "1");

@@ -1,5 +1,7 @@
 #include "app/App.h"
 
+#include "app/CameraTrack.h"
+#include "app/Face.h"
 #include "app/Playback.h"
 #include "app/SeatAnchor.h"
 #include "app/DesktopBehavior.h"
@@ -126,7 +128,14 @@ class App {
   public:
     App(const Options &options, const RunEnvironment &env)
         : options_(options), env_(env), pacer_(options.fps),
-          playback_(Playback::Config{}) {}
+          playback_(Playback::Config{}), blinkOn_(options.blink), gazeOn_(options.gaze),
+          blinkMorphName_(options.blinkMorph) {
+        blink_ = BlinkScheduler(BlinkSettings{}, std::random_device{}()); // different timing every run
+        GazeSettings gaze;
+        gaze.enabled = options.gaze;
+        gaze.radius = options.gazeRadius;
+        gaze_.setSettings(gaze);
+    }
 
     int run();
 
@@ -150,9 +159,16 @@ class App {
         ipc::Request request;
         std::promise<ipc::Json> response;
     };
+    // Which camera track goes with a motion: the <name>.camera.json next to it
+    // (if any), none, or an explicit file.
+    struct CameraChoice {
+        enum class Mode : std::uint8_t { sidecar, none, file } mode{Mode::sidecar};
+        std::filesystem::path path;
+    };
     struct QueuedMotion {
         std::filesystem::path path;
         bool loop{true};
+        CameraChoice camera;
     };
     bool startIpc();
     ipc::Json handleIpcOnServerThread(const ipc::Request &request);
@@ -163,7 +179,15 @@ class App {
                                                         ipc::Json &errorResponse, const std::string &requestId,
                                                         bool allowMissing = false) const;
     void loadNewModel(const std::filesystem::path &path);
-    void playMotion(const std::filesystem::path &path, bool loop);
+    void playMotion(const std::filesystem::path &path, bool loop, const CameraChoice &camera = {});
+    std::optional<CameraChoice> readCameraChoice(const ipc::Json &params, ipc::Json &errorResponse,
+                                                 const std::string &requestId) const;
+    void setCameraTrack(std::optional<CameraTrack> track, std::filesystem::path path);
+    void bindFace();
+    bool updateFace(double dt, float frame);
+    [[nodiscard]] ipc::Json faceJson() const;
+    void updateCameraView();
+    [[nodiscard]] mmd::Float3 defaultCameraFocus() const;
     void stopMotion();
     void failQueuedCommands();
     void fitCamera();
@@ -180,7 +204,7 @@ class App {
     void playBehaviorMotion(const std::filesystem::path &path);
     void placeSeat();
     [[nodiscard]] RECT shellRect() const;
-    [[nodiscard]] Camera behaviorCamera(bool withSeatOffset = true) const;
+    [[nodiscard]] Camera behaviorCamera(bool withSeatOffset = true, bool withTrack = true) const;
     void presentPose(const mmd::AnimatedModelFrame &frame, bool discontinuous);
     void beginPoseFade(double seconds);
     void bindSeatAnchor();
@@ -227,6 +251,27 @@ class App {
     HWND followTarget_{nullptr};
     double lastFollowCheck_{-1.0};
     std::optional<QueuedMotion> nextMotion_;
+
+    // Camera track of the current motion. cameraView_ is what is applied this
+    // frame; on a motion switch it fades from the view shown at that moment.
+    static constexpr double kCameraFadeSeconds = 0.25;
+    std::optional<CameraTrack> cameraTrack_;
+    std::filesystem::path cameraTrackPath_;
+    std::optional<CameraView> cameraView_; // nullopt = the default camera
+    CameraView cameraFadeFrom_{};
+    double cameraFadeStart_{0.0};
+    bool cameraFading_{false};
+
+    // Automatic blink and gaze (Face.h). Bones/morphs are looked up per model.
+    BlinkScheduler blink_;
+    GazeFollower gaze_;
+    bool blinkOn_{true};
+    bool gazeOn_{true};
+    std::string blinkMorphName_;
+    std::optional<std::size_t> blinkMorph_;
+    std::vector<std::size_t> eyeClosingMorphs_;
+    std::optional<std::size_t> neckBone_, headBone_, eyesBone_, leftEyeBone_, rightEyeBone_;
+    float lastBlinkWeight_{0.0F};
 
     struct Seat {
         DesktopWindow window;
@@ -533,6 +578,8 @@ void App::mainLoop() {
             // alive but do not render. Wake on input or every ~33 ms.
             const double dt = clock_.tick();
             playback_.update(dt);
+            if (updateFace(dt, static_cast<float>(playback_.frame())))
+                needEvaluate_ = true; // a blink or the gaze: render the next frame
             updateClickThrough(cursorProbe());
             d3d_->probeOnly(cursorProbe());
             MsgWaitForMultipleObjectsEx(0, nullptr, 33, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
@@ -543,7 +590,7 @@ void App::mainLoop() {
 }
 
 bool App::needsRedraw() const {
-    if (viewDirty_ || needEvaluate_ || fading_ || glide_ || (seat_ && !seat_->landed))
+    if (viewDirty_ || needEvaluate_ || fading_ || cameraFading_ || glide_ || (seat_ && !seat_->landed))
         return true;
     if (playback_.paused())
         return false;
@@ -554,6 +601,8 @@ bool App::needsRedraw() const {
 void App::frameTick(double dt) {
     const long long t0 = qpcNow();
     const Playback::Step step = playback_.update(dt);
+    if (updateFace(dt, step.kind != Playback::Kind::none ? step.frame : static_cast<float>(playback_.frame())))
+        needEvaluate_ = true;
     if (step.kind != Playback::Kind::none) {
         const mmd::AnimatedModelFrame *frame = nullptr;
         switch (step.kind) {
@@ -584,7 +633,7 @@ void App::frameTick(double dt) {
         const QueuedMotion next = *nextMotion_;
         nextMotion_.reset();
         try {
-            playMotion(next.path, next.loop);
+            playMotion(next.path, next.loop, next.camera);
         } catch (const std::exception &e) {
             log::error("続けて再生するモーションを読み込めません: {}", e.what());
         }
@@ -600,6 +649,7 @@ void App::frameTick(double dt) {
         tickGlide(qpcSeconds(qpcNow()));
     if (seat_)
         placeSeat();
+    updateCameraView();
     const Camera renderCamera = behaviorCamera();
     if (behavior_ == BehaviorState::transition) {
         if (seat_ && seat_->landed)
@@ -880,6 +930,10 @@ void App::loadNewModel(const std::filesystem::path &path) {
     }
     renderer_ = std::move(renderer);
     nextMotion_.reset();
+    cameraTrack_.reset(); // the new model starts with the default camera
+    cameraTrackPath_.clear();
+    cameraView_.reset();
+    cameraFading_ = false;
     needEvaluate_ = false;
     bindSeatAnchor();
 
@@ -891,14 +945,254 @@ void App::loadNewModel(const std::filesystem::path &path) {
     viewDirty_ = true;
 }
 
-void App::playMotion(const std::filesystem::path &path, bool loop) {
+void App::playMotion(const std::filesystem::path &path, bool loop, const CameraChoice &camera) {
+    // An explicit camera file must load (the request fails otherwise); a broken
+    // sidecar only costs the camera move, not the motion.
+    std::optional<CameraTrack> track;
+    std::filesystem::path trackPath;
+    if (camera.mode == CameraChoice::Mode::file) {
+        track = CameraTrack::load(camera.path);
+        trackPath = camera.path;
+    }
     model_->loadMotion(path); // throws LoadError; the current motion stays on failure
+    if (camera.mode == CameraChoice::Mode::sidecar) {
+        for (const auto &sidecar : CameraTrack::sidecarPaths(path)) {
+            std::error_code ec;
+            if (!std::filesystem::is_regular_file(sidecar, ec))
+                continue;
+            try {
+                track = CameraTrack::load(sidecar);
+                trackPath = sidecar;
+            } catch (const std::exception &e) {
+                log::warn("カメラトラックを読み込めないため、カメラは動かしません: {}", e.what());
+            }
+            break;
+        }
+    }
+    setCameraTrack(std::move(track), std::move(trackPath));
     Playback::Config config = playback_.config();
     config.hasMotion = true;
     config.lastFrame = model_->motionLastFrame();
     config.loop = loop;
     playback_.restart(config); // frame 0, physics state kept
     viewDirty_ = true;
+}
+
+// ---------------------------------------------------------------------------
+// Camera tracks
+// ---------------------------------------------------------------------------
+
+mmd::Float3 App::defaultCameraFocus() const {
+    return {camera_.target.x, camera_.target.y, camera_.target.z};
+}
+
+void App::setCameraTrack(std::optional<CameraTrack> track, std::filesystem::path path) {
+    if (!track && !cameraTrack_ && !cameraView_)
+        return; // the default camera stays as it is
+    cameraFadeFrom_ = cameraView_ ? *cameraView_ : neutralCameraView(defaultCameraFocus());
+    cameraFadeStart_ = qpcSeconds(qpcNow());
+    cameraFading_ = true;
+    cameraTrack_ = std::move(track);
+    cameraTrackPath_ = std::move(path);
+    if (cameraTrack_)
+        log::info("カメラトラック: {}（{}、キー {} 個）", pathToUtf8(cameraTrackPath_),
+                  cameraTrack_->isVmd() ? "MMD カメラ" : "JSON", cameraTrack_->keyCount());
+    viewDirty_ = true;
+}
+
+// Samples the track at the current motion frame (focus bones in their current
+// pose) and blends in from the previous view after a motion switch.
+void App::updateCameraView() {
+    if (!cameraTrack_ && !cameraFading_) {
+        cameraView_.reset();
+        return;
+    }
+    const mmd::Float3 fallback = defaultCameraFocus();
+    CameraView view = neutralCameraView(fallback);
+    if (cameraTrack_) {
+        view = cameraTrack_->sample(playback_.frame(), fallback,
+                                    [this](const CameraKey &key) -> std::optional<mmd::Float3> {
+                                        if (key.focus)
+                                            return key.focus;
+                                        if (key.focusBone.empty())
+                                            return std::nullopt;
+                                        const auto bone = model_->findBone(key.focusBone);
+                                        if (!bone)
+                                            return std::nullopt; // models differ: use the default look-at point
+                                        const auto p = model_->bonePosition(*bone, true);
+                                        return mmd::Float3{p[0] + key.focusOffset[0], p[1] + key.focusOffset[1],
+                                                           p[2] + key.focusOffset[2]};
+                                    });
+    }
+    if (cameraFading_) {
+        const double t = (qpcSeconds(qpcNow()) - cameraFadeStart_) / kCameraFadeSeconds;
+        if (t >= 1.0)
+            cameraFading_ = false;
+        else
+            view = blendCameraViews(cameraFadeFrom_, view, applyCameraEase(CameraEase::smooth, static_cast<float>(t)));
+    }
+    if (!cameraTrack_ && !cameraFading_)
+        cameraView_.reset();
+    else
+        cameraView_ = view;
+}
+
+// ---------------------------------------------------------------------------
+// Automatic face: blink and gaze
+// ---------------------------------------------------------------------------
+
+void App::bindFace() {
+    blinkMorph_.reset();
+    eyeClosingMorphs_.clear();
+    if (!blinkMorphName_.empty())
+        blinkMorph_ = model_->findMorph(blinkMorphName_);
+    for (const char *name : {"まばたき", "瞬き", "blink", "Blink"})
+        if (!blinkMorph_)
+            blinkMorph_ = model_->findMorph(name);
+    // Morphs that already close the eyes: no blink on top of them.
+    const auto &morphs = model_->model().morphs;
+    for (std::size_t i = 0; i < morphs.size(); ++i) {
+        const std::string &n = morphs[i].name;
+        for (const char *part : {"まばたき", "瞬き", "ウィンク", "ｳｨﾝｸ", "笑い", "はぅ", "なごみ", "目閉じ", "blink", "wink"})
+            if (n.find(part) != std::string::npos) {
+                eyeClosingMorphs_.push_back(i);
+                break;
+            }
+    }
+    const auto bone = [&](std::initializer_list<const char *> names) -> std::optional<std::size_t> {
+        for (const char *name : names)
+            if (const auto found = model_->findBone(name))
+                return found;
+        return std::nullopt;
+    };
+    neckBone_ = bone({"首", "neck"});
+    headBone_ = bone({"頭", "head"});
+    eyesBone_ = bone({"両目", "eyes"});
+    leftEyeBone_ = bone({"左目", "eye_L"});
+    rightEyeBone_ = bone({"右目", "eye_R"});
+    gaze_.reset();
+    model_->setAutoMorph(std::nullopt, 0.0F);
+    model_->setGazeRotations({});
+    lastBlinkWeight_ = 0.0F;
+    log::info("自動の表情: まばたき={} 視線=頭{} 首{} 目{}",
+              blinkMorph_ ? model_->model().morphs[*blinkMorph_].name : std::string("（モーフなし）"),
+              headBone_ ? "あり" : "なし", neckBone_ ? "あり" : "なし",
+              (eyesBone_ || leftEyeBone_ || rightEyeBone_) ? "あり" : "なし");
+}
+
+// Advances the blink and the gaze. Returns true if the pose needs re-evaluating.
+bool App::updateFace(double dt, float frame) {
+    bool changed = false;
+
+    // Blink: unless the motion or an expression already closes the eyes.
+    float blinkWeight = 0.0F;
+    if (blinkOn_ && blinkMorph_) {
+        bool eyesClosed = false;
+        for (const auto morph : eyeClosingMorphs_) {
+            const float w = std::max(model_->overrideWeight(morph).value_or(0.0F), model_->motionMorphWeight(morph, frame));
+            if (w > 0.3F) {
+                eyesClosed = true;
+                break;
+            }
+        }
+        if (eyesClosed)
+            blink_.hold();
+        else
+            blinkWeight = blink_.update(dt);
+    }
+    if (blinkWeight != lastBlinkWeight_) {
+        model_->setAutoMorph(blinkMorph_, blinkWeight);
+        lastBlinkWeight_ = blinkWeight;
+        changed = true;
+    }
+
+    // Gaze: follow the cursor while it is near the head.
+    if (!headBone_ || !window_ || !d3d_)
+        return changed;
+    bool active = false;
+    facemath::Quat wanted = facemath::kIdentity;
+    if (gazeOn_ && !grabbed_ && !walk_ && window_->hwnd() != nullptr && IsWindowVisible(window_->hwnd())) {
+        POINT cursor{};
+        if (GetCursorPos(&cursor) && ScreenToClient(window_->hwnd(), &cursor)) {
+            const float width = static_cast<float>(d3d_->width());
+            const float height = static_cast<float>(d3d_->height());
+            const Camera camera = behaviorCamera();
+            const std::size_t eyeBone = eyesBone_ ? *eyesBone_ : *headBone_;
+            const mmd::Float3 eyes = model_->bonePosition(eyeBone, true);
+            const auto head = camera.project(eyes, width, height);
+            const float dpiScale = static_cast<float>(GetDpiForWindow(window_->hwnd())) / 96.0F;
+            const float radius = gaze_.settings().radius > 0.0F ? gaze_.settings().radius * dpiScale : height * 0.6F;
+            const float dx = static_cast<float>(cursor.x) - head.x;
+            const float dy = static_cast<float>(cursor.y) - head.y;
+            active = std::isfinite(head.x) && std::isfinite(head.y) && dx * dx + dy * dy <= radius * radius;
+            if (active) {
+                const auto ray = camera.ray(static_cast<float>(cursor.x) + 0.5F, static_cast<float>(cursor.y) + 0.5F,
+                                            width, height);
+                const auto eye = camera.eye();
+                const mmd::Float3 target =
+                    gazeTarget({eye.x, eye.y, eye.z}, {ray.direction.x, ray.direction.y, ray.direction.z}, eyes);
+                const mmd::Float3 toward{target[0] - eyes[0], target[1] - eyes[1], target[2] - eyes[2]};
+                // The head as the motion turned it: take out the gaze we added last frame.
+                const auto &bones = model_->bones();
+                const facemath::Quat headNow =
+                    *headBone_ < bones.size() ? bones[*headBone_].rotation : facemath::kIdentity;
+                const facemath::Quat base = facemath::multiply(headNow, facemath::conjugate(gaze_.headPart()));
+                wanted = gazeRotation(base, toward, gaze_.settings().maxYaw, gaze_.settings().maxPitch);
+            }
+        }
+    }
+    if (gaze_.update(dt, active, wanted)) {
+        std::vector<std::pair<std::size_t, mmd::Float4>> rotations;
+        if (gaze_.weight() > 0.0F) {
+            const auto &s = gaze_.settings();
+            if (neckBone_)
+                rotations.emplace_back(*neckBone_, gaze_.part(s.neckShare));
+            rotations.emplace_back(*headBone_, gaze_.part(neckBone_ ? s.headShare : s.headShare + s.neckShare));
+            if (eyesBone_) {
+                rotations.emplace_back(*eyesBone_, gaze_.part(s.eyeShare));
+            } else {
+                if (leftEyeBone_)
+                    rotations.emplace_back(*leftEyeBone_, gaze_.part(s.eyeShare));
+                if (rightEyeBone_)
+                    rotations.emplace_back(*rightEyeBone_, gaze_.part(s.eyeShare));
+            }
+        }
+        model_->setGazeRotations(rotations);
+        changed = true;
+    }
+    return changed;
+}
+
+ipc::Json App::faceJson() const {
+    return {{"blink", blinkOn_},
+            {"blinkMorph", blinkMorph_ ? ipc::Json(model_->model().morphs[*blinkMorph_].name) : ipc::Json(nullptr)},
+            {"gaze", gazeOn_},
+            {"gazeRadius", gaze_.settings().radius},
+            {"gazeWeight", gaze_.weight()}};
+}
+
+std::optional<App::CameraChoice> App::readCameraChoice(const ipc::Json &params, ipc::Json &errorResponse,
+                                                       const std::string &requestId) const {
+    CameraChoice choice;
+    const auto it = params.find("camera");
+    if (it == params.end() || it->is_null())
+        return choice;
+    if (it->is_boolean()) {
+        if (!it->get<bool>())
+            choice.mode = CameraChoice::Mode::none;
+        return choice;
+    }
+    if (!it->is_string()) {
+        errorResponse = ipc::makeError(requestId, ipc::error::invalidParams,
+                                       "camera はカメラトラックのパスか false で指定してください");
+        return std::nullopt;
+    }
+    const auto path = resolveIpcPath(params, "camera", errorResponse, requestId);
+    if (!path)
+        return std::nullopt;
+    choice.mode = CameraChoice::Mode::file;
+    choice.path = *path;
+    return choice;
 }
 
 void App::stopMotion() {
@@ -908,6 +1202,7 @@ void App::stopMotion() {
     config.lastFrame = 0.0F;
     playback_.restart(config); // back to the rest pose, physics state kept
     nextMotion_.reset();
+    setCameraTrack(std::nullopt, {});
     viewDirty_ = true;
 }
 
@@ -922,6 +1217,7 @@ ipc::Json App::statusJson() const {
                   {"finished", playback_.finished()}};
         if (nextMotion_)
             motion["next"] = pathToUtf8(nextMotion_->path);
+        motion["camera"] = cameraTrack_ ? ipc::Json(pathToUtf8(cameraTrackPath_)) : ipc::Json(nullptr);
     }
     ipc::Json morphs = ipc::Json::object();
     for (const auto &[name, weight] : model_->morphOverrides())
@@ -939,6 +1235,7 @@ ipc::Json App::statusJson() const {
             {"physics", {{"enabled", model_->physicsEnabled()}, {"status", toString(model_->physicsStatus())}}},
             {"fps", {{"target", options_.fps}, {"measured", measuredFps_}}},
             {"morphOverrides", morphs},
+            {"face", faceJson()},
             {"transparent", window_->transparent()}};
 }
 
@@ -977,6 +1274,9 @@ ipc::Json App::executeCommand(const ipc::Request &request) {
                 return ipc::makeError(id, ipc::error::invalidParams, "loop は true / false で指定してください");
             loop = it->get<bool>();
         }
+        const auto camera = readCameraChoice(params, errorResponse, id);
+        if (!camera)
+            return errorResponse;
         std::optional<QueuedMotion> next;
         if (const auto it = params.find("next"); it != params.end() && !it->is_null()) {
             if (!it->is_object())
@@ -984,13 +1284,16 @@ ipc::Json App::executeCommand(const ipc::Request &request) {
             const auto nextPath = resolveIpcPath(*it, "path", errorResponse, id);
             if (!nextPath)
                 return errorResponse;
-            QueuedMotion queued{*nextPath, true};
+            const auto nextCamera = readCameraChoice(*it, errorResponse, id);
+            if (!nextCamera)
+                return errorResponse;
+            QueuedMotion queued{*nextPath, true, *nextCamera};
             if (const auto l = it->find("loop"); l != it->end() && l->is_boolean())
                 queued.loop = l->get<bool>();
             next = queued;
         }
         try {
-            playMotion(*path, loop);
+            playMotion(*path, loop, *camera);
         } catch (const std::exception &e) {
             log::error("IPC play_motion 失敗: {}", e.what());
             return ipc::makeError(id, ipc::error::loadFailed, e.what());
@@ -1018,6 +1321,45 @@ ipc::Json App::executeCommand(const ipc::Request &request) {
             return ipc::makeError(id, ipc::error::notFound, "モデルにモーフがありません: " + name->get<std::string>());
         needEvaluate_ = true;
         return ipc::makeSuccess(id, statusJson());
+    }
+
+    if (command == "configure_face") {
+        // {"blink": bool, "gaze": bool, "gazeRadius": px, "blinkMorph": name}; omitted = unchanged
+        const auto boolean = [&](const char *key, bool &value) -> bool {
+            const auto it = params.find(key);
+            if (it == params.end() || it->is_null())
+                return true;
+            if (!it->is_boolean())
+                return false;
+            value = it->get<bool>();
+            return true;
+        };
+        bool blinkOn = blinkOn_;
+        bool gazeOn = gazeOn_;
+        if (!boolean("blink", blinkOn) || !boolean("gaze", gazeOn))
+            return ipc::makeError(id, ipc::error::invalidParams, "blink / gaze は true か false で指定してください");
+        GazeSettings gaze = gaze_.settings();
+        if (const auto it = params.find("gazeRadius"); it != params.end() && !it->is_null()) {
+            if (!it->is_number() || it->get<double>() < 0.0 || it->get<double>() > 10000.0)
+                return ipc::makeError(id, ipc::error::invalidParams, "gazeRadius は 0〜10000（0 = 自動）です");
+            gaze.radius = it->get<float>();
+        }
+        std::string morph = blinkMorphName_;
+        if (const auto it = params.find("blinkMorph"); it != params.end() && !it->is_null()) {
+            if (!it->is_string())
+                return ipc::makeError(id, ipc::error::invalidParams, "blinkMorph はモーフ名で指定してください");
+            morph = it->get<std::string>();
+        }
+        blinkOn_ = blinkOn;
+        gazeOn_ = gazeOn;
+        gaze.enabled = gazeOn;
+        gaze_.setSettings(gaze);
+        if (morph != blinkMorphName_) {
+            blinkMorphName_ = morph;
+            bindFace();
+        }
+        needEvaluate_ = true;
+        return ipc::makeSuccess(id, faceJson());
     }
 
     if (command == "set_morphs") {
@@ -1436,8 +1778,22 @@ void App::finishBehavior(bool returnFromSeat) {
     playBehaviorMotion(activeBehavior_.idleMotion);
 }
 
-Camera App::behaviorCamera(bool withSeatOffset) const {
+Camera App::behaviorCamera(bool withSeatOffset, bool withTrack) const {
     Camera camera = camera_;
+    if (withTrack && cameraView_) {
+        // The track moves the camera relative to the default one: the focus
+        // takes the place of the default look-at point.
+        const CameraView &v = *cameraView_;
+        camera.target.x += v.focus[0] - camera_.target.x;
+        camera.target.y += v.focus[1] - camera_.target.y;
+        camera.target.z += v.focus[2] - camera_.target.z;
+        camera.distance /= std::max(0.05F, v.zoom);
+        camera.yaw += DirectX::XMConvertToRadians(v.yawDegrees);
+        camera.pitch = std::clamp(camera.pitch + DirectX::XMConvertToRadians(v.pitchDegrees), -1.45F, 1.45F);
+        camera.roll += DirectX::XMConvertToRadians(v.rollDegrees);
+        if (v.fovDegrees > 0.0F)
+            camera.fovY = DirectX::XMConvertToRadians(v.fovDegrees);
+    }
     if (seat_) {
         camera.yaw += DirectX::XMConvertToRadians(seatSettings_.yawDegrees);
         if (withSeatOffset) {
@@ -1500,6 +1856,7 @@ void App::presentPose(const mmd::AnimatedModelFrame &frame, bool discontinuous) 
 }
 
 void App::bindSeatAnchor() {
+    bindFace();
     seatAnchor_.bind(model_->model(), seatSettings_);
     poseBlender_ = std::make_unique<PoseBlender>(model_->model());
     displayBones_.clear();
@@ -1516,7 +1873,8 @@ void App::bindSeatAnchor() {
 DirectX::XMFLOAT2 App::seatAnchorPoint() const {
     const float width = static_cast<float>(d3d_->width());
     const float height = static_cast<float>(d3d_->height());
-    const Camera camera = behaviorCamera(false);
+    // The seat stays put while a camera track plays: anchor with the default camera.
+    const Camera camera = behaviorCamera(false, false);
     const auto &bones = displayBones_.empty() ? model_->bones() : displayBones_;
     mmd::Float3 anchor{camera_.target.x, camera_.target.y, camera_.target.z};
     const bool boneOnly = seat_ && seat_->hip;

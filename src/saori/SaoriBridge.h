@@ -31,6 +31,11 @@ struct BridgeConfig {
     double zoom{1.0};
     int fps{60};
     bool physics{true};
+    // "face": automatic blink and gaze following (runtime defaults: both on)
+    bool blink{true};
+    std::string blinkMorph;
+    bool gaze{true};
+    double gazeRadius{0.0};
     DWORD launchTimeoutMs{5000};
     DWORD requestTimeoutMs{3000};
     DWORD loadTimeoutMs{10000};

@@ -1,7 +1,9 @@
 // Minimal self-contained unit tests for ukagaka3d (no external framework).
 //   uka3d_tests <test-assets-dir>            run unit tests
 //   uka3d_tests --verify-captures <dir>      verify PNG frames written by GUI smoke tests
+#include "app/CameraTrack.h"
 #include "app/CommandLine.h"
+#include "app/Face.h"
 #include "app/DesktopBehavior.h"
 #include "app/Interaction.h"
 #include "app/Playback.h"
@@ -215,6 +217,231 @@ void testCamera() {
         height.fitToBounds(wide, 0.56F, 1.02F, true);
         CHECK(height.distance < all.distance * 0.6F);
     }
+}
+
+bool approx(float a, float b, float eps = 1e-3F) {
+    return std::abs(a - b) <= eps;
+}
+
+template <typename F> bool throwsRuntime(F &&f) {
+    try {
+        f();
+    } catch (const std::runtime_error &e) {
+        std::printf("    (expected error) %s\n", e.what());
+        return true;
+    } catch (...) {
+        return false;
+    }
+    return false;
+}
+
+void testCameraTrack() {
+    const mmd::Float3 look{0.0F, 10.0F, 0.0F};
+    const auto track = CameraTrack::fromJson(nlohmann::json::parse(R"({
+        "version": 1,
+        "keys": [
+            {"frame": 60},
+            {"frame": 0},
+            {"frame": 30, "focus": [0, 17, -1], "zoom": 2, "yaw": -12, "pitch": 6, "ease": "linear"}
+        ]})"));
+    CHECK(track.keys().size() == 3);
+    CHECK(track.keys()[1].frame == 30.0); // sorted by frame
+    CHECK(approx(static_cast<float>(track.lastFrame()), 60.0F));
+    const CameraTrack::FocusResolver fixed = [](const CameraKey &key) { return key.focus; };
+
+    // Held outside the keyed range, exact at keys.
+    CameraView v = track.sample(-5.0, look, fixed);
+    CHECK(approx(v.zoom, 1.0F) && approx(v.focus[1], 10.0F) && approx(v.yawDegrees, 0.0F));
+    v = track.sample(30.0, look, fixed);
+    CHECK(approx(v.zoom, 2.0F) && approx(v.focus[1], 17.0F) && approx(v.focus[2], -1.0F) && approx(v.yawDegrees, -12.0F) &&
+          approx(v.pitchDegrees, 6.0F));
+    v = track.sample(500.0, look, fixed);
+    CHECK(approx(v.zoom, 1.0F) && approx(v.focus[1], 10.0F));
+
+    // Linear key: halfway is halfway (zoom halfway in log space = sqrt 2).
+    v = track.sample(15.0, look, fixed);
+    CHECK(approx(v.focus[1], 13.5F) && approx(v.yawDegrees, -6.0F) && approx(v.zoom, std::sqrt(2.0F)));
+    // Smooth key (the default) is symmetric: halfway is halfway, but slower near the ends.
+    v = track.sample(45.0, look, fixed);
+    CHECK(approx(v.focus[1], 13.5F));
+    const CameraView early = track.sample(33.0, look, fixed);
+    CHECK(early.focus[1] > 16.8F); // only ~3% of the way back after 10% of the time
+
+    // A resolver can follow a bone; nullopt falls back to the default look-at point.
+    const auto boneTrack = CameraTrack::fromJson(
+        nlohmann::json::parse(R"({"keys": [{"frame": 0, "focusBone": "頭", "focusOffset": [0, 1, 0], "zoom": 1.5}]})"));
+    CHECK(boneTrack.keys()[0].focusBone == "頭");
+    v = boneTrack.sample(0.0, look, [](const CameraKey &key) -> std::optional<mmd::Float3> {
+        return mmd::Float3{0.0F, 16.0F + key.focusOffset[1], 0.0F};
+    });
+    CHECK(approx(v.focus[1], 17.0F) && approx(v.zoom, 1.5F));
+    v = boneTrack.sample(0.0, look, [](const CameraKey &) { return std::optional<mmd::Float3>(); });
+    CHECK(approx(v.focus[1], 10.0F));
+
+    // Zoom and pitch are clamped.
+    const auto clamped =
+        CameraTrack::fromJson(nlohmann::json::parse(R"({"keys": [{"frame": 0, "zoom": 100, "pitch": 120}]})"));
+    CHECK(approx(clamped.keys()[0].zoom, 8.0F) && approx(clamped.keys()[0].pitchDegrees, 80.0F));
+
+    // Blends and eases.
+    const CameraView a = neutralCameraView(look);
+    CameraView b{{0.0F, 20.0F, 0.0F}, 4.0F, 30.0F, 0.0F};
+    const CameraView mid = blendCameraViews(a, b, 0.5F);
+    CHECK(approx(mid.zoom, 2.0F) && approx(mid.focus[1], 15.0F) && approx(mid.yawDegrees, 15.0F));
+    CHECK(approx(applyCameraEase(CameraEase::easeIn, 0.5F), 0.25F));
+    CHECK(approx(applyCameraEase(CameraEase::easeOut, 0.5F), 0.75F));
+    CHECK(approx(applyCameraEase(CameraEase::smooth, 2.0F), 1.0F));
+
+    // Invalid input.
+    CHECK(throwsRuntime([] { CameraTrack::fromJson(nlohmann::json::parse(R"({"keys": []})")); }));
+    CHECK(throwsRuntime([] { CameraTrack::fromJson(nlohmann::json::parse(R"({"version": 2, "keys": [{"frame": 0}]})")); }));
+    CHECK(throwsRuntime([] { CameraTrack::fromJson(nlohmann::json::parse(R"({"keys": [{"zoom": 2}]})")); }));
+    CHECK(throwsRuntime([] { CameraTrack::fromJson(nlohmann::json::parse(R"({"keys": [{"frame": 0, "focus": [1, 2]}]})")); }));
+    CHECK(throwsRuntime([] { CameraTrack::fromJson(nlohmann::json::parse(R"({"keys": [{"frame": 0, "ease": "bounce"}]})")); }));
+    CHECK(throwsRuntime(
+        [] { CameraTrack::fromJson(nlohmann::json::parse(R"({"keys": [{"frame": 0, "focus": [0,0,0], "focusBone": "頭"}]})")); }));
+    CHECK(throwsRuntime([] { CameraTrack::load(L"存在しないカメラ.camera.json"); }));
+
+    // Sidecar naming: an MMD camera VMD is looked for first.
+    const auto sidecars = CameraTrack::sidecarPaths(L"motion/待機.vmd");
+    CHECK(sidecars.size() == 2 && sidecars[0] == fs::path(L"motion/待機.camera.vmd") &&
+          sidecars[1] == fs::path(L"motion/待機.camera.json"));
+
+    // MMD camera: MMD's initial camera is the neutral view on any model.
+    const mmd::Float3 fitted{0.0F, 9.7F, -0.3F};
+    mmd::VmdCameraState state; // distance -45, look-at (0, 0, 0) by default
+    state.position = {0.0F, 10.0F, 0.0F};
+    v = mmdCameraView(state, fitted);
+    CHECK(approx(v.zoom, 1.0F) && approx(v.focus[1], 9.7F) && approx(v.focus[2], -0.3F) && approx(v.yawDegrees, 0.0F) &&
+          approx(v.pitchDegrees, 0.0F) && approx(v.fovDegrees, 30.0F));
+    // Closer, higher, looking down from above (rotation.x < 0), turned toward +X (rotation.y > 0).
+    state.distance = -22.5F;
+    state.position = {1.0F, 15.0F, 2.0F};
+    state.rotation = {-0.2F, 0.3F, 0.1F};
+    state.viewAngle = 20.0F;
+    v = mmdCameraView(state, fitted);
+    CHECK(approx(v.zoom, 2.0F) && approx(v.focus[0], 1.0F) && approx(v.focus[1], 14.7F) && approx(v.focus[2], 1.7F));
+    CHECK(v.pitchDegrees > 11.0F && v.pitchDegrees < 12.0F); // camera above -> this camera's +pitch
+    CHECK(v.yawDegrees < -17.0F && v.yawDegrees > -17.5F);  // toward +X -> this camera's -yaw
+    CHECK(approx(v.fovDegrees, 20.0F) && v.rollDegrees > 5.0F);
+    {
+        Camera base;
+        base.target = {0.0F, 9.7F, 0.0F};
+        base.distance = 40.0F;
+        Camera moved = base;
+        moved.pitch = DirectX::XMConvertToRadians(v.pitchDegrees);
+        moved.yaw = DirectX::XMConvertToRadians(v.yawDegrees);
+        CHECK(moved.eye().y > base.eye().y && moved.eye().x > 0.0F); // above and on the viewer's right
+    }
+    // A VMD without camera keys is refused; a camera VMD plays with MMD's curves.
+    CHECK(throwsRuntime([] { CameraTrack::fromVmd(mmd::VmdMotion{}); }));
+    {
+        mmd::VmdMotion camera;
+        mmd::VmdCameraKey first;
+        first.frame = 0;
+        first.distance = -45.0F;
+        first.position = {0.0F, 10.0F, 0.0F};
+        first.viewAngle = 30.0F;
+        mmd::VmdCameraKey second = first;
+        second.frame = 30;
+        second.distance = -15.0F;
+        for (std::size_t i = 0; i < 24; i += 4) { // linear curves
+            second.interpolation[i] = 20;
+            second.interpolation[i + 1] = 107;
+            second.interpolation[i + 2] = 20;
+            second.interpolation[i + 3] = 107;
+        }
+        camera.cameras = {first, second};
+        camera.lastFrame = 30;
+        const auto vmdTrack = CameraTrack::fromVmd(camera);
+        CHECK(vmdTrack.isVmd() && vmdTrack.keyCount() == 2 && approx(static_cast<float>(vmdTrack.lastFrame()), 30.0F));
+        CHECK(approx(vmdTrack.sample(0.0, fitted, nullptr).zoom, 1.0F));
+        CHECK(approx(vmdTrack.sample(30.0, fitted, nullptr).zoom, 3.0F));
+        CHECK(approx(vmdTrack.sample(15.0, fitted, nullptr).zoom, 1.5F, 0.05F)); // distance 30
+    }
+    // Field of view blends from the default when only one side sets it.
+    CameraView wide = neutralCameraView(fitted);
+    wide.fovDegrees = 40.0F;
+    CHECK(approx(blendCameraViews(neutralCameraView(fitted), wide, 0.5F).fovDegrees, 35.0F));
+    CHECK(approx(blendCameraViews(neutralCameraView(fitted), neutralCameraView(fitted), 0.5F).fovDegrees, 0.0F));
+}
+
+void testFace() {
+    // Blink: closes within the interval, reaches 1, opens again; disabled = never.
+    BlinkSettings settings;
+    settings.minInterval = 1.0F;
+    settings.maxInterval = 1.0F;
+    settings.doubleChance = 0.0F;
+    BlinkScheduler blink(settings, 7);
+    float peak = 0.0F;
+    double firstClose = -1.0;
+    for (int i = 0; i < 130; ++i) { // 1.3 s at 10 ms (the blink ends at 1.21 s)
+        const float w = blink.update(0.01);
+        if (w > 0.0F && firstClose < 0.0)
+            firstClose = i * 0.01;
+        peak = std::max(peak, w);
+    }
+    CHECK(firstClose > 0.95 && firstClose < 1.05);
+    CHECK(approx(peak, 1.0F));
+    CHECK(!blink.blinking() && blink.update(0.01) == 0.0F); // open again, next one scheduled
+    blink.hold();
+    CHECK(blink.secondsToNext() >= 1.0);
+    settings.enabled = false;
+    BlinkScheduler off(settings, 7);
+    float any = 0.0F;
+    for (int i = 0; i < 300; ++i)
+        any = std::max(any, off.update(0.01));
+    CHECK(any == 0.0F);
+
+    // Gaze: identity head, target straight ahead -> no turn.
+    using namespace facemath;
+    const Quat none = gazeRotation(kIdentity, {0.0F, 0.0F, -1.0F}, 40.0F, 25.0F);
+    CHECK(angleDegrees(none) < 0.01F);
+    // 30 degrees toward +X: the head's forward ends up pointing that way.
+    const mmd::Float3 toward{std::sin(0.5236F), 0.0F, -std::cos(0.5236F)};
+    const Quat turn = gazeRotation(kIdentity, toward, 40.0F, 25.0F);
+    const mmd::Float3 forward = rotate(turn, {0.0F, 0.0F, -1.0F});
+    CHECK(approx(forward[0], toward[0]) && approx(forward[2], toward[2]) && approx(forward[1], 0.0F));
+    // Limited: 80 degrees sideways and far up are clamped to 40 / 25.
+    const Quat wide = gazeRotation(kIdentity, {std::sin(1.396F), 0.0F, -std::cos(1.396F)}, 40.0F, 25.0F);
+    CHECK(approx(angleDegrees(wide), 40.0F, 0.05F));
+    const Quat up = gazeRotation(kIdentity, {0.0F, 1.0F, -0.1F}, 40.0F, 25.0F);
+    CHECK(approx(angleDegrees(up), 25.0F, 0.05F));
+    // Relative to the head: a head already turned 30 degrees needs no more for the same target.
+    const Quat headTurned = between({0.0F, 0.0F, -1.0F}, toward);
+    CHECK(angleDegrees(gazeRotation(headTurned, toward, 40.0F, 25.0F)) < 0.05F);
+    // A target behind the head does not flip the head around.
+    CHECK(angleDegrees(gazeRotation(kIdentity, {0.0F, 0.0F, 1.0F}, 40.0F, 25.0F)) <= 40.05F);
+    // The look-at point is on the cursor ray, half way to the eyes.
+    const mmd::Float3 target = gazeTarget({0.0F, 10.0F, -40.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 10.0F, 0.0F});
+    CHECK(approx(target[2], -20.0F) && approx(target[1], 10.0F));
+
+    // Follower: fades in while active, out after release, shares split the turn.
+    GazeFollower follower;
+    bool changed = false;
+    for (int i = 0; i < 100; ++i)
+        changed = follower.update(0.016, true, turn) || changed;
+    CHECK(changed && approx(follower.weight(), 1.0F));
+    CHECK(approx(angleDegrees(follower.part(1.0F)), 30.0F, 0.5F));
+    CHECK(approx(angleDegrees(follower.part(0.25F)), 7.5F, 0.3F));
+    for (int i = 0; i < 100; ++i)
+        follower.update(0.016, false, kIdentity);
+    CHECK(follower.weight() == 0.0F && angleDegrees(follower.part(1.0F)) < 0.01F);
+    CHECK(!follower.update(0.016, false, kIdentity)); // at rest: nothing to redraw
+    GazeSettings disabled;
+    disabled.enabled = false;
+    GazeFollower off2(disabled);
+    off2.update(0.5, true, turn);
+    CHECK(off2.weight() == 0.0F);
+
+    // Command line.
+    auto r = parse({L"--model", L"m.pmx", L"--no-blink", L"--no-gaze", L"--gaze-radius", L"240", L"--blink-morph", L"まばたき2"});
+    CHECK(r.ok && !r.options.blink && !r.options.gaze && approx(r.options.gazeRadius, 240.0F) &&
+          r.options.blinkMorph == "まばたき2");
+    r = parse({L"--model", L"m.pmx"});
+    CHECK(r.ok && r.options.blink && r.options.gaze && r.options.gazeRadius == 0.0F);
+    CHECK(!parse({L"--model", L"m.pmx", L"--gaze-radius", L"-3"}).ok);
+    CHECK(!parse({L"--model", L"m.pmx", L"--no-blink=1"}).ok);
 }
 
 // ---------------------------------------------------------------------------
@@ -935,6 +1162,8 @@ int wmain(int argc, wchar_t **argv) {
         run("command_line", testCommandLine);
         run("utf", testUtf);
         run("camera", testCamera);
+        run("camera_track", testCameraTrack);
+        run("face", testFace);
         run("desktop_geometry", testDesktopGeometry);
         run("hit_regions", [&] { testHitRegions(assets); });
         run("interaction_input", testInteractionInput);
