@@ -128,7 +128,7 @@ ParseResult parseCommandLine(std::span<const std::wstring_view> args) {
                 return fail("--allowed-root にはフォルダのパスが必要です");
             opt.allowedRoots.emplace_back(std::wstring(*value));
         } else if (name == "--model" || name == "--motion" || name == "--log" || name == "--capture" ||
-                   name == "--hit-regions") {
+                   name == "--hit-regions" || name == "--accessory-config") {
             const auto value = takeValue();
             if (!value || value->empty())
                 return fail(std::format("{} にはファイルパスが必要です", name));
@@ -141,6 +141,8 @@ ParseResult parseCommandLine(std::span<const std::wstring_view> args) {
                 opt.capturePath = std::move(path);
             else if (name == "--hit-regions")
                 opt.hitRegionsPath = std::move(path);
+            else if (name == "--accessory-config")
+                opt.accessoryConfig = std::move(path);
             else
                 opt.logPath = std::move(path);
         } else if (name == "--width" || name == "--height") {
@@ -237,6 +239,7 @@ std::string usageText() {
   --parent-pid <n>  指定プロセスの終了時に自動終了し、そのプロセスからの接続だけを許可する
   --allowed-root <dir>  IPC で指定できるファイルの範囲（複数指定可）
   --hit-regions <path>  当たり判定プロファイルの JSON（起動元ゴーストへのイベント用）
+  --accessory-config <path>  accessories を含む JSON（相対パスは JSON のフォルダを基準にする）
   --follow-window-class <class>  起動元プロセスの指定クラスのウィンドウ（SSP 本体側シェル: Tmainform）に
                     位置と大きさを合わせる（ドラッグするとそのウィンドウを動かす）
 

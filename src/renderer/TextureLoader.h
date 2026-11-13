@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -32,7 +33,8 @@ class TextureCache {
     explicit TextureCache(D3DContext &d3d) : d3d_(d3d) {}
 
     // Returns nullptr srv when the file cannot be loaded (a warning is logged once).
-    const Texture &load(const std::filesystem::path &path);
+    std::shared_ptr<const Texture> load(const std::filesystem::path &path);
+    void clearLookup() { cache_.clear(); }
     Texture createFromImage(const Image &image, bool generateMips);
 
     [[nodiscard]] std::size_t loadedCount() const noexcept {
@@ -44,7 +46,7 @@ class TextureCache {
 
   private:
     D3DContext &d3d_;
-    std::map<std::wstring, Texture> cache_;
+    std::map<std::wstring, std::weak_ptr<const Texture>> cache_;
     std::size_t loaded_{};
     std::size_t failed_{};
 };

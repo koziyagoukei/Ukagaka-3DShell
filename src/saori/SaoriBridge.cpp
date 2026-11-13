@@ -13,7 +13,7 @@ namespace uka3d::saori {
 namespace {
 
 #ifndef UKA3D_VERSION
-#define UKA3D_VERSION "0.1.1-beta"
+#define UKA3D_VERSION "0.2.0"
 #endif
 constexpr const char *kVersion = "ukagaka3d_saori/" UKA3D_VERSION;
 
@@ -267,6 +267,10 @@ SaoriResponse SaoriBridge::launch(const std::vector<std::string> &args) {
     }
     add(L"--model");
     add(model->native());
+    if (std::filesystem::is_regular_file(baseDir_ / L"ukagaka3d.json", ec)) {
+        add(L"--accessory-config");
+        add((baseDir_ / L"ukagaka3d.json").native());
+    }
     if (!config_.interaction.empty()) {
         if (const auto profile = resolvePath(pathToUtf8(config_.interaction), false, error)) {
             add(L"--hit-regions");
@@ -367,6 +371,9 @@ SaoriResponse SaoriBridge::forward(const std::string &command, const ipc::Json &
         return fail(errorMessage(*response), errorCode(*response));
     }
     const auto result = response->value("result", ipc::Json::object());
+    if (command == "get_accessory_status")
+        return ok(result.value("effectiveVisible", false) ? "visible" :
+                  (result.value("attached", false) ? "hidden" : "detached"), ipc::dump(result));
     return ok(command == "get_behavior_status" ? result.value("state", std::string("Idle")) : "OK",
               ipc::dump(result));
 }
@@ -416,6 +423,33 @@ SaoriResponse SaoriBridge::execute(const std::vector<std::string> &arguments) {
         return ok(kVersion);
 
     std::string error;
+    if (command == "list_accessories")
+        return forward(command, ipc::Json::object(), config_.requestTimeoutMs);
+    if (command == "attach_accessory" || command == "detach_accessory" || command == "unload_accessory" ||
+        command == "get_accessory_status" ||
+        command == "set_accessory_visible") {
+        ipc::Json params{{"id", arg(1)}};
+        if (command == "attach_accessory") {
+            if (!arg(2).empty())
+                params["parentModel"] = arg(2) == "-" ? std::string() : arg(2);
+            if (!arg(3).empty())
+                params["parentBone"] = arg(3) == "-" ? std::string() : arg(3);
+        }
+        if (command == "set_accessory_visible") {
+            const auto visible = parseBool(arg(2));
+            if (!visible)
+                return fail("visible は 1 / 0 で指定してください", ipc::error::invalidParams);
+            params["visible"] = *visible;
+        }
+        return forward(command, params, config_.requestTimeoutMs);
+    }
+    if (command == "load_accessory" || command == "set_accessory_transform") {
+        auto params = ipc::Json::parse(arg(2), nullptr, false);
+        if (!params.is_object())
+            return fail("第2引数には JSON オブジェクトを指定してください", ipc::error::invalidParams);
+        params["id"] = arg(1);
+        return forward(command, params, command == "load_accessory" ? config_.loadTimeoutMs : config_.requestTimeoutMs);
+    }
     if (command == "stop_move" || command == "stand_up" || command == "get_behavior_status" ||
         command == "list_windows")
         return forward(command, ipc::Json::object(), config_.requestTimeoutMs);

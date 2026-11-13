@@ -27,6 +27,7 @@ struct StaticVertex {
 struct SceneConstants {
     XMFLOAT4X4 viewProj;
     XMFLOAT4X4 view;
+    XMFLOAT4X4 world;
     XMFLOAT3 lightDir;
     float edgePixel;
     XMFLOAT3 lightColor;
@@ -94,7 +95,8 @@ Image makeSharedToonImage(int index) {
 
 } // namespace
 
-ModelRenderer::ModelRenderer(D3DContext &d3d, const MmdModel &model) : d3d_(d3d), model_(model), textures_(d3d) {
+ModelRenderer::ModelRenderer(D3DContext &d3d, const MmdModel &model, SharedAssets &assets)
+    : d3d_(d3d), model_(model), assets_(assets) {
     createPipeline();
     createBuffers();
     loadMaterials();
@@ -155,6 +157,8 @@ void ModelRenderer::createPipeline() {
     depth.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
     depth.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
     throwIfFailed(device->CreateDepthStencilState(&depth, &depth_), "CreateDepthStencilState");
+    depth.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+    throwIfFailed(device->CreateDepthStencilState(&depth, &depthReadOnly_), "CreateDepthStencilState(read-only)");
 
     // MMD/PMX uses D3D's default clockwise front faces in a left-handed space.
     D3D11_RASTERIZER_DESC raster{};
@@ -174,43 +178,48 @@ void ModelRenderer::createBuffers() {
     auto *device = d3d_.device();
     const auto &pmx = model_.model();
 
-    std::vector<StaticVertex> statics(pmx.vertices.size());
     std::vector<ModelRenderer::DynamicVertex> dynamics(pmx.vertices.size());
     for (std::size_t i = 0; i < pmx.vertices.size(); ++i) {
         const auto &v = pmx.vertices[i];
-        statics[i] = {{v.uv[0], v.uv[1]}, v.edgeScale};
         std::memcpy(dynamics[i].position, v.position.data(), sizeof(dynamics[i].position));
         std::memcpy(dynamics[i].normal, v.normal.data(), sizeof(dynamics[i].normal));
     }
 
     D3D11_BUFFER_DESC desc{};
-    desc.Usage = D3D11_USAGE_IMMUTABLE;
-    desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    desc.ByteWidth = static_cast<UINT>(statics.size() * sizeof(StaticVertex));
-    D3D11_SUBRESOURCE_DATA data{statics.data(), 0, 0};
-    throwIfFailed(device->CreateBuffer(&desc, &data, &staticVb_), "CreateBuffer(static VB)");
-
     desc.Usage = D3D11_USAGE_DYNAMIC;
+    desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
     desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     desc.ByteWidth = static_cast<UINT>(dynamics.size() * sizeof(ModelRenderer::DynamicVertex));
-    data.pSysMem = dynamics.data();
+    D3D11_SUBRESOURCE_DATA data{dynamics.data(), 0, 0};
     throwIfFailed(device->CreateBuffer(&desc, &data, &dynamicVb_), "CreateBuffer(dynamic VB)");
 
+    auto &cached = assets_.meshes[model_.modelPath()];
+    mesh_ = cached.lock();
+    if (mesh_)
+        return;
+    mesh_ = std::make_shared<SharedAssets::Mesh>();
+    std::vector<StaticVertex> statics;
+    statics.reserve(pmx.vertices.size());
+    for (const auto &v : pmx.vertices)
+        statics.push_back({{v.uv[0], v.uv[1]}, v.edgeScale});
     desc.Usage = D3D11_USAGE_IMMUTABLE;
     desc.CPUAccessFlags = 0;
+    desc.ByteWidth = static_cast<UINT>(statics.size() * sizeof(StaticVertex));
+    data.pSysMem = statics.data();
+    throwIfFailed(device->CreateBuffer(&desc, &data, &mesh_->vertices), "CreateBuffer(static VB)");
     desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
     if (pmx.vertices.size() <= 0xFFFF) {
         std::vector<std::uint16_t> indices(pmx.indices.begin(), pmx.indices.end());
-        indexFormat_ = DXGI_FORMAT_R16_UINT;
+        mesh_->indexFormat = DXGI_FORMAT_R16_UINT;
         desc.ByteWidth = static_cast<UINT>(indices.size() * sizeof(std::uint16_t));
         data.pSysMem = indices.data();
-        throwIfFailed(device->CreateBuffer(&desc, &data, &ib_), "CreateBuffer(IB16)");
+        throwIfFailed(device->CreateBuffer(&desc, &data, &mesh_->indices), "CreateBuffer(IB16)");
     } else {
-        indexFormat_ = DXGI_FORMAT_R32_UINT;
         desc.ByteWidth = static_cast<UINT>(pmx.indices.size() * sizeof(std::uint32_t));
         data.pSysMem = pmx.indices.data();
-        throwIfFailed(device->CreateBuffer(&desc, &data, &ib_), "CreateBuffer(IB32)");
+        throwIfFailed(device->CreateBuffer(&desc, &data, &mesh_->indices), "CreateBuffer(IB32)");
     }
+    cached = mesh_;
 }
 
 ID3D11ShaderResourceView *ModelRenderer::sharedToon(int index) {
@@ -218,16 +227,18 @@ ID3D11ShaderResourceView *ModelRenderer::sharedToon(int index) {
         return nullptr;
     auto &toon = sharedToons_[static_cast<std::size_t>(index)];
     if (!toon.srv)
-        toon = textures_.createFromImage(makeSharedToonImage(index), false);
+        toon = assets_.textures.createFromImage(makeSharedToonImage(index), false);
     return toon.srv.Get();
 }
 
 void ModelRenderer::loadMaterials() {
     const auto &pmx = model_.model();
-    const auto textureAt = [&](std::int32_t index) -> ID3D11ShaderResourceView * {
+    const auto textureAt = [&](std::int32_t index) -> const Texture & {
+        static const Texture missing;
         if (index < 0 || static_cast<std::size_t>(index) >= pmx.textures.size())
-            return nullptr;
-        return textures_.load(model_.resolveTexturePath(static_cast<std::size_t>(index))).srv.Get();
+            return missing;
+        materialTextures_.push_back(assets_.textures.load(model_.resolveTexturePath(static_cast<std::size_t>(index))));
+        return *materialTextures_.back();
     };
 
     UINT offset = 0;
@@ -239,21 +250,23 @@ void ModelRenderer::loadMaterials() {
         offset += material.indexCount;
         gpu.doubleSided = (material.drawFlags & 0x01) != 0;
         gpu.edge = (material.drawFlags & 0x10) != 0 && material.edgeSize > 0.0F;
-        gpu.texture = textureAt(material.textureIndex);
+        const auto &base = textureAt(material.textureIndex);
+        gpu.texture = base.srv.Get();
+        gpu.textureTranslucent = base.translucent;
         gpu.sphereMode = material.sphereMode;
         if (material.sphereMode == 1 || material.sphereMode == 2)
-            gpu.sphere = textureAt(material.sphereTextureIndex);
+            gpu.sphere = textureAt(material.sphereTextureIndex).srv.Get();
         if (material.toonMode == 1)
             gpu.toon = sharedToon(material.toonTextureIndex);
         else
-            gpu.toon = textureAt(material.toonTextureIndex);
+            gpu.toon = textureAt(material.toonTextureIndex).srv.Get();
         materials_.push_back(gpu);
         log::debug("マテリアル \"{}\": 面={} テクスチャ={} スフィア={}({}) トゥーン={}{} 両面={} エッジ={}",
                    material.name, material.indexCount / 3, material.textureIndex, material.sphereTextureIndex,
                    material.sphereMode, material.toonMode == 1 ? "共有" : "", material.toonTextureIndex,
                    gpu.doubleSided, gpu.edge);
     }
-    log::info("テクスチャ読み込み: 成功={} 失敗={}", textures_.loadedCount(), textures_.failedCount());
+    log::info("テクスチャキャッシュ: 成功={} 失敗={}", assets_.textures.loadedCount(), assets_.textures.failedCount());
 
     animatedMaterials_.resize(pmx.materials.size());
     for (std::size_t i = 0; i < pmx.materials.size(); ++i) {
@@ -326,7 +339,7 @@ void ModelRenderer::upload(float alpha) {
     context->Unmap(dynamicVb_.Get(), 0);
 }
 
-void ModelRenderer::draw(const Camera &camera) {
+void ModelRenderer::draw(const Camera &camera, FXMMATRIX world, Pass pass) {
     if (!visible_)
         return;
     auto *context = d3d_.context();
@@ -336,6 +349,7 @@ void ModelRenderer::draw(const Camera &camera) {
     const XMMATRIX view = camera.view();
     XMStoreFloat4x4(&scene.viewProj, view * camera.projection(aspect));
     XMStoreFloat4x4(&scene.view, view);
+    XMStoreFloat4x4(&scene.world, world);
     // MMD default light: direction (-0.5, -1.0, 0.5), colour 154/255.
     XMStoreFloat3(&scene.lightDir, XMVector3Normalize(XMVectorSet(-0.5F, -1.0F, 0.5F, 0.0F)));
     scene.lightColor = {154.0F / 255.0F, 154.0F / 255.0F, 154.0F / 255.0F};
@@ -347,11 +361,11 @@ void ModelRenderer::draw(const Camera &camera) {
     std::memcpy(mapped.pData, &scene, sizeof(scene));
     context->Unmap(sceneCb_.Get(), 0);
 
-    ID3D11Buffer *vbs[] = {dynamicVb_.Get(), staticVb_.Get()};
+    ID3D11Buffer *vbs[] = {dynamicVb_.Get(), mesh_->vertices.Get()};
     const UINT strides[] = {sizeof(ModelRenderer::DynamicVertex), sizeof(StaticVertex)};
     const UINT offsets[] = {0, 0};
     context->IASetVertexBuffers(0, 2, vbs, strides, offsets);
-    context->IASetIndexBuffer(ib_.Get(), indexFormat_, 0);
+    context->IASetIndexBuffer(mesh_->indices.Get(), mesh_->indexFormat, 0);
     context->IASetInputLayout(layout_.Get());
     context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
@@ -362,7 +376,15 @@ void ModelRenderer::draw(const Camera &camera) {
     context->PSSetSamplers(0, 2, samplers);
     const float blendFactor[4] = {0, 0, 0, 0};
     context->OMSetBlendState(blend_.Get(), blendFactor, 0xFFFFFFFF);
-    context->OMSetDepthStencilState(depth_.Get(), 0);
+    context->OMSetDepthStencilState(pass == Pass::translucent ? depthReadOnly_.Get() : depth_.Get(), 0);
+
+    const auto drawInPass = [&](std::size_t i, bool edge) {
+        const auto &m = animatedMaterials_[i];
+        const bool translucent = m.diffuse[3] < 1.0F ||
+            (edge ? m.edgeColor[3] < 1.0F : materials_[i].textureTranslucent ||
+                     m.textureMultiply[3] + m.textureAdd[3] < 1.0F);
+        return pass == Pass::all || translucent == (pass == Pass::translucent);
+    };
 
     const auto writeMaterial = [&](std::size_t index, UINT flags) {
         const auto &m = animatedMaterials_[index];
@@ -391,7 +413,7 @@ void ModelRenderer::draw(const Camera &camera) {
     context->PSSetShader(ps_.Get(), nullptr, 0);
     for (std::size_t i = 0; i < materials_.size(); ++i) {
         const auto &gpu = materials_[i];
-        if (gpu.indexCount == 0 || animatedMaterials_[i].diffuse[3] <= 0.0F)
+        if (gpu.indexCount == 0 || animatedMaterials_[i].diffuse[3] <= 0.0F || !drawInPass(i, false))
             continue;
         UINT flags = 0;
         if (gpu.texture)
@@ -413,7 +435,7 @@ void ModelRenderer::draw(const Camera &camera) {
     context->RSSetState(cullFront_.Get());
     for (std::size_t i = 0; i < materials_.size(); ++i) {
         const auto &gpu = materials_[i];
-        if (!gpu.edge || gpu.indexCount == 0 || animatedMaterials_[i].diffuse[3] <= 0.0F)
+        if (!gpu.edge || gpu.indexCount == 0 || animatedMaterials_[i].diffuse[3] <= 0.0F || !drawInPass(i, true))
             continue;
         writeMaterial(i, 0);
         context->DrawIndexed(gpu.indexCount, gpu.indexOffset, 0);

@@ -3,8 +3,8 @@
 1 RT_MANIFEST "ukagaka3d.manifest"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,1,1,0
- PRODUCTVERSION 0,1,1,0
+ FILEVERSION 0,2,0,0
+ PRODUCTVERSION 0,2,0,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS VOS_NT_WINDOWS32
@@ -16,9 +16,9 @@ BEGIN
         BLOCK "041104b0"
         BEGIN
             VALUE "FileDescription", "ukagaka3d - 3D shell runtime for Ukagaka"
-            VALUE "FileVersion", "0.1.1-beta"
+            VALUE "FileVersion", "0.2.0"
             VALUE "ProductName", "ukagaka3d"
-            VALUE "ProductVersion", "0.1.1-beta"
+            VALUE "ProductVersion", "0.2.0"
         END
     END
     BLOCK "VarFileInfo"

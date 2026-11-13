@@ -4,6 +4,10 @@
     "model": "3d/model/uka/MS_Uka.pmx",
     "motionDir": "3d/motion",
     "interaction": "hit-regions.json",
+    "accessories": [
+        { "id": "glasses", "model": "3d/accessories/glasses.pmx", "parentModel": "main",
+          "parentBone": "頭", "position": [0, 0.4, -1.8], "scale": 1.0, "visible": false }
+    ],
     // ゴーストのフォルダ以外に読み込みを許可するフォルダ（通常は空のまま）
     "allowedRoots": [],
     // followWindowClass: SSP の本体側シェル（Tmainform）に位置と大きさを合わせる。

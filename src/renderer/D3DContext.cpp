@@ -225,10 +225,18 @@ void D3DContext::probeOnly(std::optional<POINT> probe) {
     sampleProbe(probe);
 }
 
-bool D3DContext::endFrame(std::optional<POINT> probe, UINT syncInterval) {
+void D3DContext::sampleInputFrame(POINT probe) {
+    context_->OMSetRenderTargets(0, nullptr, nullptr);
     if (msaaSamples_ > 1)
         context_->ResolveSubresource(backBuffer_.Get(), 0, msaaColor_.Get(), 0, colorFormat);
     sampleProbe(probe);
+}
+
+bool D3DContext::endFrame(std::optional<POINT> probe, UINT syncInterval, bool sampleFinal) {
+    if (msaaSamples_ > 1)
+        context_->ResolveSubresource(backBuffer_.Get(), 0, msaaColor_.Get(), 0, colorFormat);
+    if (sampleFinal)
+        sampleProbe(probe);
 
     if (!capturePath_.empty()) {
         try {

@@ -127,11 +127,12 @@ Texture TextureCache::createFromImage(const Image &image, bool generateMips) {
     return result;
 }
 
-const Texture &TextureCache::load(const std::filesystem::path &path) {
+std::shared_ptr<const Texture> TextureCache::load(const std::filesystem::path &path) {
     std::wstring key = path.lexically_normal().native();
     std::transform(key.begin(), key.end(), key.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
-    if (const auto found = cache_.find(key); found != cache_.end())
-        return found->second;
+    auto &cached = cache_[key];
+    if (const auto found = cached.lock())
+        return found;
 
     Texture texture;
     try {
@@ -144,7 +145,9 @@ const Texture &TextureCache::load(const std::filesystem::path &path) {
         ++failed_;
         log::warn("テクスチャを読み込めません（白で代替）: {}", e.what());
     }
-    return cache_.emplace(std::move(key), std::move(texture)).first->second;
+    auto loaded = std::make_shared<const Texture>(std::move(texture));
+    cached = loaded;
+    return loaded;
 }
 
 } // namespace uka3d

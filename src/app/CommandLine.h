@@ -32,6 +32,7 @@ struct Options {
     // this class name, e.g. SSP's sakura shell window "Tmainform".
     std::string followWindowClass;
     std::filesystem::path hitRegionsPath;
+    std::filesystem::path accessoryConfig;
     // Camera framing: fit the whole model ("all") or only its height ("height").
     bool fitHeight{false};
     float zoom{1.0F}; // >1 = closer

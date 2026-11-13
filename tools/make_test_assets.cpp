@@ -134,6 +134,32 @@ mmd::PmxMaterial material(const char *name, mmd::Float4 diffuse, Float3 ambient,
     return m;
 }
 
+mmd::PmxModel buildGlasses() {
+    mmd::PmxModel model;
+    model.metadata.version = 2.0F;
+    model.metadata.modelName = "サンプル眼鏡";
+    model.metadata.englishName = "Sample Glasses";
+    model.bones.push_back(bone("センター", "root", {}, -1, 0x001E));
+    model.materials.push_back(material("Frame", {0.08F, 0.14F, 0.24F, 1.0F}, {0.16F, 0.20F, 0.32F}, -1, 0));
+    model.materials.push_back(material("Lens", {0.28F, 0.66F, 0.88F, 0.25F}, {0.08F, 0.13F, 0.16F}, -1, 0));
+    MeshBuilder mesh{model, {{}, {}}};
+    for (float x : {-0.57F, 0.57F}) {
+        for (float y : {-0.29F, 0.29F})
+            mesh.box(0, 0, {x, y, 0}, {0.48F, 0.045F, 0.04F});
+        for (float side : {-0.44F, 0.44F})
+            mesh.box(0, 0, {x + side, 0, 0}, {0.045F, 0.28F, 0.04F});
+        mesh.quad(1, 0, {x - 0.42F, -0.27F, 0.01F}, {x + 0.42F, -0.27F, 0.01F},
+                  {x + 0.42F, 0.27F, 0.01F}, {x - 0.42F, 0.27F, 0.01F}, {0, 0, -1});
+    }
+    mesh.box(0, 0, {0, 0.08F, 0}, {0.16F, 0.045F, 0.04F});
+    for (std::size_t i = 0; i < model.materials.size(); ++i) {
+        const auto &indices = mesh.perMaterial[i];
+        model.materials[i].indexCount = static_cast<std::uint32_t>(indices.size());
+        model.indices.insert(model.indices.end(), indices.begin(), indices.end());
+    }
+    return model;
+}
+
 void writeImages(const fs::path &texDir) {
     // 顔.png: 128x128 face with eyes/mouth and a coloured border.
     {
@@ -553,6 +579,8 @@ int wmain(int argc, wchar_t **argv) {
         fs::create_directories(modelDir / L"tex");
         fs::create_directories(motionDir);
         fs::create_directories(brokenDir);
+        fs::create_directories(out / L"accessories");
+        static_cast<void>(mmd::pmx::save(out / L"accessories/glasses.pmx", buildGlasses()));
 
         writeImages(modelDir / L"tex");
         const auto model = buildModel();

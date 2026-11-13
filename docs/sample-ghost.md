@@ -61,6 +61,7 @@ powershell -ExecutionPolicy Bypass -File scripts\package-ghost.ps1 -YayaDll C:\p
 
 - モデルはゴーストのフォルダの中（`3d/model/user/`）にコピーされます。SAORI はゴーストのフォルダの外を読めないためです。
 - `hit-regions.json` の球の位置と、`ghost.dic` のモーフ名を新しいモデルに合わせます。[モデル差し替えの手順](author-guide/01-models.md)
+- 「眼鏡」メニューを使う場合は `ukagaka3d.json` の `accessories` にある `parentBone` と `position` もモデルに合わせます。[アクセサリーの設定](author-guide/08-accessories.md)
 - 再配布できないモデルを使った出力は、公開しないでください。
 
 ## 辞書から 3D を操作する

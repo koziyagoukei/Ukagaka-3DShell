@@ -3,6 +3,7 @@
 //   uka3d_tests --verify-captures <dir>      verify PNG frames written by GUI smoke tests
 #include "app/CameraTrack.h"
 #include "app/CommandLine.h"
+#include "app/Accessories.h"
 #include "app/Face.h"
 #include "app/DesktopBehavior.h"
 #include "app/Interaction.h"
@@ -1152,6 +1153,29 @@ void run(const char *name, const std::function<void()> &test) {
 
 } // namespace
 
+void testAttachmentMatrix() {
+    using namespace DirectX;
+    mmd::PmxModel model;
+    model.bones.resize(1);
+    model.bones[0].position = {2, 3, 4};
+    const BoneTransform previous{};
+    BoneTransform current{};
+    const float halfAngle = XM_PIDIV4;
+    current.rotation = {0, 0, std::sin(halfAngle), std::cos(halfAngle)};
+    current.translation = {10, 20, 30};
+    const auto bone = attachmentMatrix(model, 0, std::span(&previous, 1), std::span(&current, 1), 1);
+    const AccessoryTransform accessory{{1, 0, 0}, {0, 0, 90}, 2};
+    const auto world = accessory.matrix() * bone * XMMatrixScaling(2, 2, 2);
+    XMFLOAT3 point;
+    XMStoreFloat3(&point, XMVector3TransformCoord(XMVectorSet(1, 0, 0, 1), world));
+    CHECK(std::abs(point.x - 10) < 0.001F && std::abs(point.y - 46) < 0.001F &&
+          std::abs(point.z - 68) < 0.001F);
+    const auto halfway = attachmentMatrix(model, 0, std::span(&previous, 1), std::span(&current, 1), 0.5F);
+    XMStoreFloat3(&point, XMVector3TransformCoord(XMVectorZero(), halfway));
+    CHECK(std::abs(point.x - 4.5F) < 0.001F && std::abs(point.y - 12.5F) < 0.001F &&
+          std::abs(point.z - 19) < 0.001F);
+}
+
 int wmain(int argc, wchar_t **argv) {
     SetConsoleOutputCP(CP_UTF8);
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -1165,6 +1189,7 @@ int wmain(int argc, wchar_t **argv) {
         run("camera_track", testCameraTrack);
         run("face", testFace);
         run("desktop_geometry", testDesktopGeometry);
+        run("attachment_matrix", testAttachmentMatrix);
         run("hit_regions", [&] { testHitRegions(assets); });
         run("interaction_input", testInteractionInput);
         run("sstp_mouse_events", testSstpMouseEvents);

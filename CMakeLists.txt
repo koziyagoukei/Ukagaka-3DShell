@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(ukagaka3d VERSION 0.1.1 LANGUAGES CXX RC)
+project(ukagaka3d VERSION 0.2.0 LANGUAGES CXX RC)
 
 # Version shown by the runtime (--version) and the SAORI bridge (GET Version).
-set(UKA3D_VERSION_LABEL "${PROJECT_VERSION}-beta")
+set(UKA3D_VERSION_LABEL "${PROJECT_VERSION}")
 add_compile_definitions(UKA3D_VERSION="${UKA3D_VERSION_LABEL}")
 
 if(NOT WIN32)
@@ -61,6 +61,7 @@ if(UKA3D_BUILD_RUNTIME)
     # Core library: everything except the entry point, so tests can link it.
     add_library(uka3d_core STATIC
         src/app/App.cpp
+        src/app/Accessories.cpp
         src/app/CameraTrack.cpp
         src/app/Face.cpp
         src/app/CommandLine.cpp

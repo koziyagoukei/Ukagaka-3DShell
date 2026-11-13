@@ -1,4 +1,5 @@
 #include "app/App.h"
+#include "app/Accessories.h"
 
 #include "app/CameraTrack.h"
 #include "app/Face.h"
@@ -224,7 +225,10 @@ class App {
     std::optional<double> transparentSince_; // cursor over a transparent pixel since (qpc seconds)
     static constexpr double kClickThroughDelaySeconds = 0.08;
     std::unique_ptr<D3DContext> d3d_;
+    std::unique_ptr<ModelRenderer::SharedAssets> sharedAssets_;
     std::unique_ptr<ModelRenderer> renderer_;
+    std::unique_ptr<Accessories> accessories_;
+    std::vector<BoneTransform> previousDisplayBones_;
     Camera camera_;
     Clock clock_;
     FramePacer pacer_;
@@ -452,7 +456,22 @@ int App::run() {
         config.height = static_cast<UINT>(client.cy);
         config.debugLayer = options_.debug;
         d3d_ = std::make_unique<D3DContext>(config);
-        renderer_ = std::make_unique<ModelRenderer>(*d3d_, *model_);
+        sharedAssets_ = std::make_unique<ModelRenderer::SharedAssets>(*d3d_);
+        renderer_ = std::make_unique<ModelRenderer>(*d3d_, *model_, *sharedAssets_);
+        auto accessoryBase = options_.accessoryConfig.empty() ?
+            (options_.allowedRoots.empty() ? model_->modelPath().parent_path() : options_.allowedRoots.front()) :
+            std::filesystem::absolute(options_.accessoryConfig).parent_path();
+        auto roots = options_.allowedRoots;
+        if (roots.empty())
+            roots.push_back(accessoryBase);
+        accessories_ = std::make_unique<Accessories>(*d3d_, *sharedAssets_, *model_, accessoryBase, std::move(roots));
+        if (!options_.accessoryConfig.empty()) {
+            try {
+                accessories_->loadConfig(options_.accessoryConfig);
+            } catch (const std::exception &error) {
+                log::warn("アクセサリー設定を読み込めません: {}", error.what());
+            }
+        }
         if (interactionProfile_) {
             // SAORI supplies its ghost/master directory as the first allowed root.
             auto master = options_.allowedRoots.front().lexically_normal();
@@ -478,7 +497,9 @@ int App::run() {
               camera_.target.z, camera_.distance);
     if (!options_.ipcInstance.empty() && !startIpc()) {
         sstpEvents_.reset();
+        accessories_.reset();
         renderer_.reset();
+        sharedAssets_.reset();
         d3d_.reset();
         window_.reset();
         return exitIpcError;
@@ -513,7 +534,9 @@ int App::run() {
         CloseHandle(parentProcess_);
 
     sstpEvents_.reset();
+    accessories_.reset();
     renderer_.reset();
+    sharedAssets_.reset();
     d3d_.reset();
     desktopWindows_.reset();
     window_.reset();
@@ -573,15 +596,17 @@ void App::mainLoop() {
             continue;
         }
 
-        if (!needsRedraw()) {
+        const auto probe = cursorProbe();
+        if (!needsRedraw() && !(accessories_->visible() && probe && !d3d_->alphaAt(*probe))) {
             // Idle (paused or static without physics): keep click-through
             // alive but do not render. Wake on input or every ~33 ms.
             const double dt = clock_.tick();
             playback_.update(dt);
             if (updateFace(dt, static_cast<float>(playback_.frame())))
                 needEvaluate_ = true; // a blink or the gaze: render the next frame
-            updateClickThrough(cursorProbe());
-            d3d_->probeOnly(cursorProbe());
+            updateClickThrough(probe);
+            if (!accessories_->visible())
+                d3d_->probeOnly(probe);
             MsgWaitForMultipleObjectsEx(0, nullptr, 33, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
             continue;
         }
@@ -590,6 +615,8 @@ void App::mainLoop() {
 }
 
 bool App::needsRedraw() const {
+    if (accessories_->animating())
+        return true;
     if (viewDirty_ || needEvaluate_ || fading_ || cameraFading_ || glide_ || (seat_ && !seat_->landed))
         return true;
     if (playback_.paused())
@@ -638,6 +665,7 @@ void App::frameTick(double dt) {
             log::error("続けて再生するモーションを読み込めません: {}", e.what());
         }
     }
+    accessories_->update(dt);
     const long long t1 = qpcNow();
     stats_.evaluateSeconds += qpcSeconds(t1 - t0);
 
@@ -659,14 +687,26 @@ void App::frameTick(double dt) {
     }
     const float transparentClear[4] = {0.0F, 0.0F, 0.0F, 0.0F};
     const float windowedClear[4] = {0.18F, 0.20F, 0.24F, 1.0F};
-    d3d_->beginFrame(d3d_->transparent() ? transparentClear : windowedClear);
-    renderer_->draw(renderCamera);
+    const auto *clear = d3d_->transparent() ? transparentClear : windowedClear;
     const auto probe = cursorProbe();
+    const bool multiModel = accessories_->visible();
+    d3d_->beginFrame(clear);
+    if (multiModel) {
+        if (probe) {
+            renderer_->draw(renderCamera);
+            d3d_->sampleInputFrame(*probe);
+            d3d_->beginFrame(clear);
+        }
+        accessories_->draw(*renderer_, renderCamera, previousDisplayBones_, displayBones_,
+                           playback_.interpolationAlpha());
+    } else {
+        renderer_->draw(renderCamera);
+    }
     updateClickThrough(probe);
     const long long t2 = qpcNow();
     stats_.renderSeconds += qpcSeconds(t2 - t1);
 
-    occluded_ = !d3d_->endFrame(probe, pacer_.syncInterval());
+    occluded_ = !d3d_->endFrame(probe, pacer_.syncInterval(), !multiModel);
     pacer_.framePresented();
     viewDirty_ = false;
 
@@ -918,12 +958,17 @@ void App::loadNewModel(const std::filesystem::path &path) {
     PhysicsOptions physicsOptions;
     physicsOptions.enabled = options_.physics;
     model->setupPhysics(physicsOptions);
-    auto renderer = std::make_unique<ModelRenderer>(*d3d_, *model);
+    // A reload of the same path may have changed the PMX contents.
+    sharedAssets_->meshes.erase(model->modelPath());
+    sharedAssets_->textures.clearLookup();
+    auto renderer = std::make_unique<ModelRenderer>(*d3d_, *model, *sharedAssets_);
     if (walk_ || seat_)
         finishBehavior(true);
 
     renderer_.reset(); // refers to the old model
     model_ = std::move(model);
+    accessories_->replaceMain(*model_);
+    previousDisplayBones_.clear();
     if (interactionProfile_) {
         hitRegions_.bind(*interactionProfile_, *model_);
         interactionInput_->leave();
@@ -1250,6 +1295,13 @@ ipc::Json App::executeCommand(const ipc::Request &request) {
         return ipc::makeSuccess(id, {{"pong", true}, {"pid", GetCurrentProcessId()}});
     if (command == "status")
         return ipc::makeSuccess(id, statusJson());
+    if (command.ends_with("_accessory") || command.starts_with("set_accessory_") || command == "list_accessories" ||
+        command == "get_accessory_status") {
+        auto response = accessories_->execute(request);
+        if (response.value("success", false) && command != "list_accessories" && command != "get_accessory_status")
+            viewDirty_ = true;
+        return response;
+    }
 
     if (command == "load_model") {
         const auto path = resolveIpcPath(params, "path", errorResponse, id);
@@ -1831,6 +1883,7 @@ void App::beginPoseFade(double seconds) {
 // Skins and hands one evaluated tick to the renderer. During a motion switch
 // the shown pose is a cross-fade from the pose at the moment of the switch.
 void App::presentPose(const mmd::AnimatedModelFrame &frame, bool discontinuous) {
+    previousDisplayBones_ = displayBones_;
     if (!model_->poseOnlySupported()) {
         renderer_->setFrame(frame, discontinuous); // libmmd skinned the vertices (soft bodies)
         displayBones_ = frame.bones;
@@ -1849,6 +1902,8 @@ void App::presentPose(const mmd::AnimatedModelFrame &frame, bool discontinuous) 
         model_->skinner().skin(displayBones_, frame.morphWeights, renderer_->beginFrame());
         renderer_->commitFrame(frame, discontinuous);
     }
+    if (discontinuous)
+        previousDisplayBones_.clear();
     if (seat_) {
         anchorPrevious_ = discontinuous ? seatAnchorPoint() : anchorCurrent_;
         anchorCurrent_ = seatAnchorPoint();

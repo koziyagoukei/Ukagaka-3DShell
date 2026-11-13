@@ -5,6 +5,7 @@ cbuffer SceneCB : register(b0)
 {
     float4x4 gViewProj;
     float4x4 gView;
+    float4x4 gWorld;
     float3   gLightDir;    // direction the light travels (MMD default: (-0.5, -1.0, 0.5))
     float    gEdgePixel;   // world-space size of one pixel at distance 1
     float3   gLightColor;  // MMD default: 154/255
@@ -62,11 +63,12 @@ struct PSInput
 PSInput VSMain(VSInput input)
 {
     PSInput output;
-    output.position = mul(float4(input.position, 1.0), gViewProj);
-    output.normal = input.normal;
+    float4 worldPosition = mul(float4(input.position, 1.0), gWorld);
+    output.position = mul(worldPosition, gViewProj);
+    output.normal = normalize(mul(float4(input.normal, 0.0), gWorld).xyz);
     output.uv = input.uv;
-    output.toEye = gEyePos - input.position;
-    float3 viewNormal = normalize(mul(float4(input.normal, 0.0), gView).xyz);
+    output.toEye = gEyePos - worldPosition.xyz;
+    float3 viewNormal = normalize(mul(float4(output.normal, 0.0), gView).xyz);
     output.sphereUv = viewNormal.xy * float2(0.5, -0.5) + 0.5;
     return output;
 }
@@ -122,9 +124,11 @@ struct EdgeOutput
 EdgeOutput VSEdge(VSInput input)
 {
     EdgeOutput output;
-    float distanceToEye = length(gEyePos - input.position);
+    float3 worldPosition = mul(float4(input.position, 1.0), gWorld).xyz;
+    float3 worldNormal = normalize(mul(float4(input.normal, 0.0), gWorld).xyz);
+    float distanceToEye = length(gEyePos - worldPosition);
     float thickness = gEdgeSize * input.edgeScale * gEdgePixel * distanceToEye;
-    float3 position = input.position + normalize(input.normal) * thickness;
+    float3 position = worldPosition + worldNormal * thickness;
     output.position = mul(float4(position, 1.0), gViewProj);
     return output;
 }

@@ -19,6 +19,7 @@ CMakeUserPresets.json
 
 # Logs / temporary files
 *.log
+ukagaka3d_accessories_state.json
 *.tmp
 *.bak
 ~$*

@@ -151,6 +151,7 @@ fs::path assembleGhost(const fs::path &work, const fs::path &ghostSrc, const fs:
     fs::create_directories(master / L"3d" / L"motion");
     fs::copy_file(runtime, master / L"3d" / L"ukagaka3d.exe", fs::copy_options::overwrite_existing);
     copyTree(assets / L"テスト用モデル", master / L"3d" / L"model");
+    copyTree(assets / L"accessories", master / L"3d" / L"accessories");
     fs::copy_file(assets / L"モーション" / L"挨拶.vmd", master / L"3d" / L"motion" / L"greet.vmd",
                   fs::copy_options::overwrite_existing);
     fs::copy_file(assets / L"モーション" / L"うなずき.vmd", master / L"3d" / L"motion" / L"nod.vmd",
@@ -180,6 +181,7 @@ void testSaori(const fs::path &dll, const fs::path &runtime, const fs::path &ass
     std::printf("    launch: %s\n", r.substr(0, r.find("\r\n\r\n")).c_str());
     CHECK(r.find("Result: 1") != std::string::npos);
     CHECK(runtimeChildren().size() == 1);
+
     CHECK(saori(m, {"play_motion", "greet", "0", "idle"}).find("Result: 1") != std::string::npos);
     CHECK(saori(m, {"set_morph", "笑い", "1"}).find("Result: 1") != std::string::npos);
     r = saori(m, {"status"});
@@ -214,6 +216,8 @@ void testYaya(const fs::path &yaya, const fs::path &dll, const fs::path &runtime
     CHECK(r.find("こんにちは") != std::string::npos);
     CHECK(r.find("\\q[笑顔にする,OnUk3dSmile]") != std::string::npos);
     CHECK(runtimeChildren().size() == 1);
+    CHECK(shiori(y, "GET", "OnUk3dGlassesOn").find("眼鏡をかけました") != std::string::npos);
+    CHECK(shiori(y, "GET", "OnUk3dGlassesOff").find("眼鏡を外しました") != std::string::npos);
 
     r = shiori(y, "GET", "OnUk3dSmile");
     CHECK(r.find("にこっ") != std::string::npos);

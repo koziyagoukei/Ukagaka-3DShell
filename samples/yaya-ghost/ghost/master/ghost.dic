@@ -9,9 +9,26 @@ MenuScript
     _m += "\n\q[あいさつ,OnUk3dGreet]　\q[うなずく,OnUk3dNod]　\q[待機,OnUk3dIdle]"
     _m += "\n\q[止める,OnUk3dStop]　\q[状態,OnUk3dStatus]"
     _m += "\n\q[デスクトップ行動,OnUk3dDesktop]"
+    _m += "\n眼鏡　\q[かける,OnUk3dGlassesOn]　\q[外す,OnUk3dGlassesOff]"
     _m += "\nまばたき　" + FaceSwitch("blink", uk3d.sample.blink) + "　目で追う　" + FaceSwitch("gaze", uk3d.sample.gaze)
     _m += "\n\n[half]\q[メニューを閉じる,OnUk3dCloseMenu]　\q[ゴーストを終了,OnUk3dExit]"
     _m
+}
+
+OnUk3dGlassesOn
+{
+    if Attach3DAccessory("glasses") == 0 {
+        return ErrorTalk
+    }
+    Menu("\0\s[0]眼鏡をかけました。")
+}
+
+OnUk3dGlassesOff
+{
+    if Detach3DAccessory("glasses") == 0 {
+        return ErrorTalk
+    }
+    Menu("\0\s[0]眼鏡を外しました。")
 }
 
 // まばたき・視線追従の ON/OFF（ランタイムの既定は両方 ON）

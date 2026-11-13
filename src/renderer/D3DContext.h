@@ -57,7 +57,9 @@ class D3DContext {
     // Resolves MSAA, samples the alpha under `probe` (client coords) for
     // click-through hit testing, and presents with the given sync interval
     // (0 = no VSync wait). Returns false when the output is occluded.
-    bool endFrame(std::optional<POINT> probe, UINT syncInterval);
+    bool endFrame(std::optional<POINT> probe, UINT syncInterval, bool sampleFinal = true);
+    // Snapshots the current frame for input before accessories are drawn.
+    void sampleInputFrame(POINT probe);
     // Samples the alpha under `probe` from the last frame without rendering
     // (used while idle so click-through keeps working).
     void probeOnly(std::optional<POINT> probe);

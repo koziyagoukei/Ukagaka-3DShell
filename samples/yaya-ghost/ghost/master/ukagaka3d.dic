@@ -31,6 +31,52 @@ UK3D_DLL
     "ukagaka3d_saori.dll"
 }
 
+Load3DAccessory
+{
+    return Call3D("load_accessory", _argv[0], _argv[1])
+}
+
+Attach3DAccessory
+{
+    if _argc >= 3 {
+        return Call3D("attach_accessory", _argv[0], _argv[1], _argv[2])
+    }
+    if _argc == 2 {
+        return Call3D("attach_accessory", _argv[0], _argv[1])
+    }
+    return Call3D("attach_accessory", _argv[0])
+}
+
+Detach3DAccessory
+{
+    return Call3D("detach_accessory", _argv[0])
+}
+
+Unload3DAccessory
+{
+    return Call3D("unload_accessory", _argv[0])
+}
+
+Set3DAccessoryVisible
+{
+    return Call3D("set_accessory_visible", _argv[0], _argv[1])
+}
+
+Set3DAccessoryTransform
+{
+    return Call3D("set_accessory_transform", _argv[0], _argv[1])
+}
+
+Get3DAccessoryStatus
+{
+    return Call3D("get_accessory_status", _argv[0])
+}
+
+List3DAccessories
+{
+    return Call3D("list_accessories")
+}
+
 // SAORI/1.0 の要求を組み立てて送り、Result / Value0 / Value1 を取り出す。
 Call3D
 {

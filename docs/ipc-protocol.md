@@ -184,6 +184,14 @@ SAORI は SSP の UI スレッドから同期的に呼ばれます。そこで�
 | `ping` | — | `{"pong":true,"pid":..}` |
 | `status` | — | 状態の JSON（下記） |
 | `load_model` | `path` | 状態 |
+| `load_accessory` | `id`, `model`。ほかのキーは [作者向け設定](author-guide/08-accessories.md) と同じ | アクセサリー状態 |
+| `attach_accessory` | `id`, 任意の `parentModel`, `parentBone` | アクセサリー状態 |
+| `detach_accessory` | `id` | アクセサリー状態 |
+| `unload_accessory` | `id` | 空オブジェクト |
+| `set_accessory_visible` | `id`, `visible` (bool) | アクセサリー状態 |
+| `set_accessory_transform` | `id`, 任意の `position`, `rotation`, `scale` | アクセサリー状態 |
+| `get_accessory_status` | `id` | アクセサリー状態 |
+| `list_accessories` | — | `{"accessories":[...]}` |
 | `play_motion` | `path`, `loop`（既定 true）, `next`（{path, loop, camera}）, `camera`（パスか false。省略時は隣の `.camera.json`） | 状態（`motion.camera` に使用中のカメラトラック） |
 | `configure_face` | `blink`（bool）, `gaze`（bool）, `gazeRadius`（96dpi px、0 = 自動）, `blinkMorph`（モーフ名）。省略した項目は変更なし | `face`（blink, blinkMorph, gaze, gazeRadius, gazeWeight） |
 | `stop_motion` | — | 状態 |
@@ -200,6 +208,10 @@ SAORI は SSP の UI スレッドから同期的に呼ばれます。そこで�
  "paused":false,"physics":{"enabled":true,"status":"有効"},"fps":{"target":60,"measured":59.9},
  "morphOverrides":{"笑い":1.0},"transparent":true}
 ```
+
+アクセサリー状態には `id`、`model`、`parentModel`、`parentBone`、`attached`、`visible`、`effectiveVisible`、`position`、`rotation`、`scale`、`physics`、`motion`、`loop` が入ります。`load_accessory` のパスは設定ファイルの場所、または `--allowed-root` の先頭を基準に解決します。
+
+SAORI では `load_accessory` と `set_accessory_transform` に `id` と JSON オブジェクトを文字列で渡します。`attach_accessory` は `id [parentModel] [parentBone]`（空欄は維持、`-` は解除）、`set_accessory_visible` は `id 1/0` を取ります。`detach_accessory`、`unload_accessory`、`get_accessory_status` は `id` を取り、`list_accessories` は引数なしです。照会の JSON は `Value1`、`get_accessory_status` の要約は `Value0`（`visible` / `hidden` / `detached`）に入ります。
 
 ### 2.5 エラーコード
 

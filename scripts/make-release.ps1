@@ -95,7 +95,7 @@ foreach ($kv in @{ '待機テスト.vmd' = 'idle.vmd'; '歩行.vmd' = 'walk.vmd'
     Copy-Item -Force (Join-Path $assets $kv.Key) (Join-Path $master "3d\motion\$($kv.Value)")
 }
 $json = [IO.File]::ReadAllText((Join-Path $master 'ukagaka3d.json'), [Text.Encoding]::UTF8)
-$json = [regex]::Replace($json, '"model":\s*"[^"]*"', '"model": "3d/model/user/model.pmx"')
+$json = [regex]::Replace($json, '(?m)^    "model":\s*"[^"\r\n]*"', '    "model": "3d/model/user/model.pmx"')
 [IO.File]::WriteAllText((Join-Path $master 'ukagaka3d.json'), $json, (New-Object Text.UTF8Encoding($false)))
 foreach ($f in @('install.txt', 'ghost\master\descript.txt')) {
     $p = Join-Path $ghost $f
@@ -123,6 +123,7 @@ tools\uka3d_motiongen.exe  モデルに合わせたモーションを作るツ�
 1. my3dghost\ghost\master\3d\model\user\ に PMX とテクスチャを置き、ukagaka3d.json の "model" を書き換えます。
 2. tools\uka3d_motiongen.exe （PMX のパス） my3dghost\ghost\master\3d\motion で、待機・歩行・着席・つまみを作ります。
 3. hit-regions.json の当たり判定と、ghost.dic の会話をモデルに合わせて変えます。
+   眼鏡を使う場合は ukagaka3d.json の accessories にある装着位置も調整します。
 4. 名前（install.txt と ghost\master\descript.txt）を変えて、フォルダを SSP に入れます。
 
 同梱の YAYA は BSD 3-Clause License です（ghost\master\yaya_LICENSE.txt）。

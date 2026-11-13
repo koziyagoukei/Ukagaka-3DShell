@@ -513,6 +513,23 @@ void testDesktopBehavior() {
     };
     const auto isIdle = [](const Json &status) { return status.value("state", "") == "Idle"; };
     const auto initial = result("get_behavior_status");
+    CHECK(result("load_accessory", {{"id", "glasses"}, {"model", "accessories/glasses.pmx"},
+                                    {"parentBone", "頭"}}).value("attached", false));
+    CHECK(!call("load_accessory", {{"id", "invalid"}, {"model", "accessories/glasses.pmx"},
+                                   {"parentBone", "存在しない"}}).value("success", true));
+    CHECK(!call("attach_accessory", {{"id", "glasses"}, {"parentModel", "glasses"}}).value("success", true));
+    const auto transformed = result("set_accessory_transform", {{"id", "glasses"}, {"scale", 1.25},
+                                                                 {"position", {0, 1, -2}}, {"rotation", {0, 10, 0}}});
+    CHECK(transformed.value("scale", 0.0) == 1.25);
+    CHECK(transformed.at("rotation") == Json::array({0, 10, 0}));
+    CHECK(!call("set_accessory_transform", {{"id", "glasses"}, {"scale", 0}}).value("success", true));
+    for (int i = 0; i < 3; ++i) {
+        CHECK(result("attach_accessory", {{"id", "glasses"}}).value("effectiveVisible", false));
+        CHECK(!result("detach_accessory", {{"id", "glasses"}}).value("effectiveVisible", true));
+    }
+    CHECK(result("attach_accessory", {{"id", "glasses"}}).value("effectiveVisible", false));
+    CHECK(!result("set_accessory_visible", {{"id", "glasses"}, {"visible", false}}).value("effectiveVisible", true));
+    CHECK(result("set_accessory_visible", {{"id", "glasses"}, {"visible", true}}).value("effectiveVisible", false));
     CHECK(isIdle(initial) && !initial.value("autoEnabled", true) && !initial.value("crossMonitors", true));
     CHECK(!call("move_to", {{"x", 1}}).value("success", true));
     CHECK(!call("move_to", {{"nextMonitor", true}}).value("success", true));
@@ -665,6 +682,17 @@ void testDesktopBehavior() {
         const auto released = result("status").value("motion", Json::object());
         CHECK(released.is_object() && released.value("path", "").find("待機テスト.vmd") != std::string::npos);
     }
+    CHECK(result("get_accessory_status", {{"id", "glasses"}}).value("attached", false));
+    result("load_model", {{"path", "テスト用モデル/テストキャラ.pmx"}});
+    CHECK(!result("get_accessory_status", {{"id", "glasses"}}).value("attached", true));
+    CHECK(result("attach_accessory", {{"id", "glasses"}}).value("effectiveVisible", false));
+    CHECK(result("load_accessory", {{"id", "child"}, {"model", "accessories/glasses.pmx"},
+                                    {"parentModel", "glasses"}, {"parentBone", "センター"},
+                                    {"visible", true}}).value("effectiveVisible", false));
+    CHECK(result("list_accessories").at("accessories").size() == 2);
+    result("unload_accessory", {{"id", "glasses"}});
+    CHECK(!result("get_accessory_status", {{"id", "child"}}).value("attached", true));
+    CHECK(result("list_accessories").at("accessories").size() == 1);
     result("shutdown");
     CHECK(exitCodeAfter(process, 5000) == 0);
     stopProcess(process);
