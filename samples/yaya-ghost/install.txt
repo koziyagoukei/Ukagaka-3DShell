@@ -1,0 +1,4 @@
+charset,UTF-8
+type,ghost
+name,ukagaka3d sample
+directory,ukagaka3d_sample

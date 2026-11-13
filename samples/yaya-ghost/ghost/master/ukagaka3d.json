@@ -1,0 +1,26 @@
+{
+    // ukagaka3d_saori.dll の設定。パスはこのフォルダ（ghost/master）からの相対パス。
+    "runtime": "3d/ukagaka3d.exe",
+    "model": "3d/model/uka/MS_Uka.pmx",
+    "motionDir": "3d/motion",
+    "interaction": "hit-regions.json",
+    // ゴーストのフォルダ以外に読み込みを許可するフォルダ（通常は空のまま）
+    "allowedRoots": [],
+    // followWindowClass: SSP の本体側シェル（Tmainform）に位置と大きさを合わせる。
+    // 右クリックで SSP、Shift+右クリックで 3D 側のメニューを開く。
+    "window": { "width": 384, "height": 682, "transparent": true, "topmost": false, "followWindowClass": "Tmainform" },
+    // fit: "height" で身長に合わせて大きく表示、"all" でモデル全体（広げた腕なども）を収める
+    "camera": { "fit": "height", "zoom": 1.0 },
+    // 着席位置の調整（モデルごと、すべて省略可）。
+    //   anchorBone   左右の基準にするボーン（省略時は左右の太ももの付け根の中点）
+    //   contactBones 座面に触れるボーン（省略時は骨盤と太ももの上半分）
+    //   useContact   false にすると anchorBone の関節の高さだけを使う
+    //   offsetX/Y    モデル座標での補正（Y を増やすと浮く、減らすと沈む）
+    //   yaw          着席中の向き（度）、inset 窓の角からの距離（96dpi でのピクセル）
+    //   transitionMs 着席・立ち上がりの遷移時間（0 で瞬時）
+    "seat": { "offsetX": 0.0, "offsetY": 0.4, "yaw": 20, "inset": 40, "transitionMs": 350 },
+    "fps": 60,
+    "physics": true,
+    "timeouts": { "launchMs": 5000, "requestMs": 3000, "loadMs": 10000 },
+    "shutdownOnUnload": true
+}

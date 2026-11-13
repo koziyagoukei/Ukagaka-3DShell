@@ -1,0 +1,164 @@
+// ---------------------------------------------------------------------------
+// ghost.dic - サンプルゴーストのイベント（会話と 3D の連動）
+// ---------------------------------------------------------------------------
+
+// 3D 操作メニュー。\q[表示,イベント名] で、選ぶとそのイベントが呼ばれる。
+MenuScript
+{
+    _m = "\n\n[half]\q[笑顔にする,OnUk3dSmile]　\q[表情を戻す,OnUk3dResetFace]"
+    _m += "\n\q[あいさつ,OnUk3dGreet]　\q[うなずく,OnUk3dNod]　\q[待機,OnUk3dIdle]"
+    _m += "\n\q[止める,OnUk3dStop]　\q[状態,OnUk3dStatus]"
+    _m += "\n\q[デスクトップ行動,OnUk3dDesktop]"
+    _m += "\n\n[half]\q[メニューを閉じる,OnUk3dCloseMenu]　\q[ゴーストを終了,OnUk3dExit]"
+    _m
+}
+
+// 選択肢のタイムアウトを無効にしてメニューを出す
+Menu
+{
+    "\![set,choicetimeout,0]" + _argv[0] + MenuScript + "\e"
+}
+
+ErrorTalk
+{
+    "\0\s[0]3D の操作に失敗しました。\n" + uk3d.error + MenuScript + "\e"
+}
+
+OnFirstBoot
+{
+    OnBoot
+}
+
+OnBoot
+{
+    if Launch3D() == 0 {
+        return "\0\s[0]こんにちは。\n\n3D キャラクターを起動できませんでした。\n" + uk3d.error + "\e"
+    }
+    _ok = Play3DMotion("greet", 0, "idle")
+    _ok = Configure3DGrab("grab", "idle", 180)
+    Menu("\0\s[0]こんにちは。\w9")
+}
+
+OnGhostChanged
+{
+    OnBoot
+}
+
+OnMouseDoubleClick
+{
+    Menu("\0\s[0]なにをしましょう？")
+}
+
+OnMouseClick
+{
+    if reference[3] != "0" || reference[5] != "0" {
+        return ""
+    }
+    if reference[4] == "Head" {
+        _ok = Set3DMorph("笑い", 0.7)
+        return "\0\s[0]頭をこつんと触ったのは、あなた？\e"
+    }
+    if reference[4] == "Face" {
+        _ok = Set3DMorph("笑い", 1.0)
+        return "\0\s[0]ほっぺを触ると、くすぐったいですよ。\e"
+    }
+    if reference[4] == "Hand" || reference[4] == "Arm" {
+        return "\0\s[0]手をつなぎますか？\e"
+    }
+    if reference[4] == "Body" || reference[4] == "Bust" {
+        return "\0\s[0]呼びました？　ダブルクリックでメニューを開けます。\e"
+    }
+    if reference[4] == "Leg" {
+        return "\0\s[0]もう少し歩いてみましょうか。\e"
+    }
+    return ""
+}
+
+OnUk3dPet
+{
+    if reference[4] == "Head" || reference[4] == "Face" {
+        _ok = Set3DMorph("笑い", 1.0)
+        return "\0\s[0]なでてくれると、なんだか落ち着きます。\e"
+    }
+    return ""
+}
+
+OnUk3dSmile
+{
+    if Set3DMorph("笑い", 1.0) == 0 {
+        return ErrorTalk
+    }
+    Menu("\0\s[0]にこっ。")
+}
+
+OnUk3dResetFace
+{
+    if Reset3DMorph() == 0 {
+        return ErrorTalk
+    }
+    Menu("\0\s[0]いつもの顔に戻しました。")
+}
+
+OnUk3dGreet
+{
+    if Play3DMotion("greet", 0, "idle") == 0 {
+        return ErrorTalk
+    }
+    Menu("\0\s[0]こんにちは！")
+}
+
+OnUk3dNod
+{
+    if Play3DMotion("nod") == 0 {
+        return ErrorTalk
+    }
+    Menu("\0\s[0]うんうん。")
+}
+
+OnUk3dIdle
+{
+    if Play3DMotion("idle") == 0 {
+        return ErrorTalk
+    }
+    Menu("\0\s[0]待機モーションに戻しました。")
+}
+
+OnUk3dStop
+{
+    if Stop3DMotion() == 0 {
+        return ErrorTalk
+    }
+    Menu("\0\s[0]モーションを止めました。")
+}
+
+OnUk3dStatus
+{
+    if Status3D() == 0 {
+        return ErrorTalk
+    }
+    Menu("\0\s[0]3D ランタイム: " + uk3d.value)
+}
+
+OnUk3dCloseMenu
+{
+    "\0\s[0]またダブルクリックしてね。\e"
+}
+
+OnUk3dDesktopBack
+{
+    OnMouseDoubleClick
+}
+
+// 3D ランタイムは \- でゴーストが閉じた後の unload で止まる（shiori3_mini.dic）。
+// ここで止めると「またね」と手を振る動きが見えないため、挨拶だけ再生する。
+OnUk3dExit
+{
+    _ok = Play3DMotion("greet", 0)
+    "\0\s[0]またね。\w8\-"
+}
+
+OnClose
+{
+    _ok = Play3DMotion("greet", 0)
+    "\0\s[0]またね。\w8\-"
+}

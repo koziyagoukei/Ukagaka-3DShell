@@ -1,0 +1,6 @@
+LIBRARY ukagaka3d_saori
+EXPORTS
+    load
+    loadu
+    unload
+    request

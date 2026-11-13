@@ -1,0 +1,74 @@
+// ---------------------------------------------------------------------------
+// shiori3_mini.dic - 最小の SHIORI/3.0 受け口（ukagaka3d サンプル用、自作）
+//
+// YAYA は request 関数に SHIORI の要求文をそのまま渡し、戻り値を応答として返す。
+// ここでは要求を解析して ID と同名の関数（OnBoot など）を呼び出す。
+//   reference[n]  : Reference0, Reference1, ... の値
+//   shiori.id     : イベント ID
+// 公式テンプレート（yaya_shiori3.dic）を使う場合は、このファイルは不要。
+// ---------------------------------------------------------------------------
+
+CRLF
+{
+    CHR(13, 10)
+}
+
+ShioriHeader
+{
+    "Charset: UTF-8" + CRLF + "Sender: ukagaka3d-sample" + CRLF
+}
+
+request
+{
+    _lines = SPLIT(_argv[0], CRLF)
+    _method = _lines[0]
+    shiori.id = ""
+    reference = IARRAY
+    _count = ARRAYSIZE(_lines)
+    for _i = 1 ; _i < _count ; _i++ {
+        _line = _lines[_i]
+        _pos = STRSTR(_line, ": ", 0)
+        if _pos > 0 {
+            _key = SUBSTR(_line, 0, _pos)
+            _value = SUBSTR(_line, _pos + 2, STRLEN(_line))
+            if _key == "ID" {
+                shiori.id = _value
+            }
+            elseif SUBSTR(_key, 0, 9) == "Reference" {
+                reference[TOINT(SUBSTR(_key, 9, STRLEN(_key)))] = _value
+            }
+        }
+    }
+
+    if "SHIORI/3.0" !_in_ _method {
+        return "SHIORI/3.0 400 Bad Request" + CRLF + ShioriHeader + CRLF
+    }
+
+    _script = ""
+    if shiori.id != "" {
+        if ISFUNC(shiori.id) == 1 {
+            _script = EVAL(shiori.id)
+        }
+    }
+    _script = REPLACE(REPLACE(TOSTR(_script), CHR(13), ""), CHR(10), "")
+
+    if "NOTIFY" _in_ _method {
+        return "SHIORI/3.0 204 No Content" + CRLF + ShioriHeader + CRLF
+    }
+    if _script == "" {
+        return "SHIORI/3.0 204 No Content" + CRLF + ShioriHeader + CRLF
+    }
+    return "SHIORI/3.0 200 OK" + CRLF + ShioriHeader + "Value: " + _script + CRLF + CRLF
+}
+
+load
+{
+    shiori.basedir = _argv[0]
+}
+
+unload
+{
+    // 終了経路に関係なく 3D ランタイムを止める（SAORI の unload でも止まる）
+    _ok = Shutdown3D()
+    UNLOADLIB(UK3D_DLL)
+}

@@ -1,0 +1,39 @@
+# Build output
+/build/
+/out/
+/install/
+CMakeUserPresets.json
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.lib
+
+# IDE / personal settings
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Logs / temporary files
+*.log
+*.tmp
+*.bak
+~$*
+
+# MMD data: never commit third-party models, motions, textures or derived data.
+/models/
+/motions/
+/samples/*
+!/samples/README.md
+!/samples/yaya-ghost/
+*.pmx
+*.pmd
+*.vmd
+*.vpd
+*.x
+*.zip
+*.7z
+*.rar

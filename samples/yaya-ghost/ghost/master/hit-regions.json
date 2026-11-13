@@ -1,0 +1,22 @@
+{
+    "mouseMove": true,
+    "pet": { "distance": 56, "minSegment": 4, "windowMs": 1400, "turns": 2, "cooldownMs": 1500 },
+    "regions": [
+        { "name": "Head", "bone": "頭", "offset": [0, 1.65, -0.15], "radius": 1.7, "priority": 20 },
+        { "name": "Face", "bone": "頭", "offset": [0, 0.9, -1.05], "radius": 0.85, "priority": 30 },
+        { "name": "Bust", "bone": "上半身2", "offset": [0, 0.65, -0.25], "radius": 1.85, "priority": 10 },
+        { "name": "Body", "bone": "下半身", "offset": [0, -1.4, 0], "radius": 2.2, "priority": 0 },
+        { "name": "Body", "bone": "上半身", "offset": [0, 0.2, -0.1], "radius": 1.7, "priority": 0 },
+        { "name": "Body", "bone": "首", "offset": [0, 0.4, 0], "radius": 1.0, "priority": -2 },
+        { "name": "Hand", "bone": "左手首", "offset": [0.35, -0.3, 0], "radius": 0.8, "priority": 20 },
+        { "name": "Hand", "bone": "右手首", "offset": [-0.35, -0.3, 0], "radius": 0.8, "priority": 20 },
+        { "name": "Arm", "bone": "左腕", "offset": [1.1, -0.8, 0], "radius": 1.4, "priority": 4 },
+        { "name": "Arm", "bone": "右腕", "offset": [-1.1, -0.8, 0], "radius": 1.4, "priority": 4 },
+        { "name": "Arm", "bone": "左ひじ", "offset": [1.05, -0.8, 0], "radius": 1.4, "priority": 4 },
+        { "name": "Arm", "bone": "右ひじ", "offset": [-1.05, -0.8, 0], "radius": 1.4, "priority": 4 },
+        { "name": "Leg", "bone": "左足", "offset": [0, -2.6, -0.3], "radius": 2.7, "priority": -1 },
+        { "name": "Leg", "bone": "右足", "offset": [0, -2.6, -0.3], "radius": 2.7, "priority": -1 },
+        { "name": "Leg", "bone": "左ひざ", "offset": [0, -2.2, 0], "radius": 2.6, "priority": -1 },
+        { "name": "Leg", "bone": "右ひざ", "offset": [0, -2.2, 0], "radius": 2.6, "priority": -1 }
+    ]
+}

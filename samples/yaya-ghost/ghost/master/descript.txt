@@ -1,0 +1,10 @@
+charset,UTF-8
+type,ghost
+name,ukagaka3d sample
+sakura.name,うか
+kero.name,（なし）
+craftman,ukagaka3d
+craftmanw,ukagaka3d
+shiori,yaya.dll
+sakura.seriko.defaultsurface,0
+kero.seriko.defaultsurface,10

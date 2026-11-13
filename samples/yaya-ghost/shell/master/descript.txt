@@ -1,0 +1,6 @@
+charset,UTF-8
+type,shell
+name,透明シェル
+craftman,ukagaka3d
+craftmanw,ukagaka3d
+seriko.use_self_alpha,1

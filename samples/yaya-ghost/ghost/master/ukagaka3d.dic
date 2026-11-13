@@ -1,0 +1,193 @@
+// ---------------------------------------------------------------------------
+// ukagaka3d.dic - 3D シェル（ukagaka3d）を YAYA から操作する共通関数
+//
+// どの関数も 1（成功）か 0（失敗）を返す。失敗の理由は uk3d.error に入る。
+// YAYA では、代入しない関数呼び出しは「出力候補」になってしまうので、
+// トーク関数の中では必ず変数に代入して使うこと:
+//
+//     _ok = Play3DMotion("greet")
+//     _ok = Set3DMorph("笑い", 1.0)
+//
+// 関数一覧
+//   Launch3D()                         3D ランタイムを起動（ukagaka3d.json の model）
+//   Launch3D("3d/model/xxx.pmx")       モデルを指定して起動
+//   Load3DModel("3d/model/xxx.pmx")    モデルを読み替える
+//   Play3DMotion("idle")               3d/motion/idle.vmd をループ再生
+//   Play3DMotion("greet", 0, "idle")   1 回再生して、終わったら idle をループ再生
+//   Stop3DMotion()                     モーション停止（基本姿勢、物理は継続）
+//   Set3DMorph("笑い", 1.0)            モーフ（表情）の重みを 0〜1 で設定
+//   Reset3DMorph()  / Reset3DMorph("笑い")
+//   Status3D()                         uk3d.value に running / stopped、uk3d.detail に JSON
+//   Shutdown3D()                       3D ランタイムを終了
+//
+// パスはゴーストのフォルダ（ghost/master）からの相対パス。フォルダの外は指定できない。
+// ---------------------------------------------------------------------------
+
+UK3D_DLL
+{
+    "ukagaka3d_saori.dll"
+}
+
+// SAORI/1.0 の要求を組み立てて送り、Result / Value0 / Value1 を取り出す。
+Call3D
+{
+    _req = "EXECUTE SAORI/1.0" + CRLF + "Charset: UTF-8" + CRLF + "Sender: ukagaka3d-sample" + CRLF
+    _req += "SecurityLevel: Local" + CRLF
+    for _i = 0 ; _i < _argc ; _i++ {
+        _arg = REPLACE(REPLACE(TOSTR(_argv[_i]), CHR(13), ""), CHR(10), "")
+        _req += "Argument" + _i + ": " + _arg + CRLF
+    }
+    _req += CRLF
+
+    uk3d.result = ""
+    uk3d.value = ""
+    uk3d.detail = ""
+    if LOADLIB(UK3D_DLL) == 0 {
+        uk3d.error = "SAORI（" + UK3D_DLL + "）を読み込めません"
+        return 0
+    }
+    _res = REQUESTLIB(UK3D_DLL, _req)
+    _lines = SPLIT(_res, CRLF)
+    foreach _lines ; _line {
+        _pos = STRSTR(_line, ": ", 0)
+        if _pos > 0 {
+            _key = SUBSTR(_line, 0, _pos)
+            _value = SUBSTR(_line, _pos + 2, STRLEN(_line))
+            if _key == "Result" {
+                uk3d.result = _value
+            }
+            elseif _key == "Value0" {
+                uk3d.value = _value
+            }
+            elseif _key == "Value1" {
+                uk3d.detail = _value
+            }
+        }
+    }
+    if uk3d.result == "1" {
+        uk3d.error = ""
+        return 1
+    }
+    uk3d.error = uk3d.value
+    if uk3d.error == "" {
+        uk3d.error = "SAORI の応答が不正です"
+    }
+    return 0
+}
+
+Launch3D
+{
+    if _argc >= 1 {
+        return Call3D("launch", _argv[0])
+    }
+    return Call3D("launch")
+}
+
+Load3DModel
+{
+    return Call3D("load_model", _argv[0])
+}
+
+Play3DMotion
+{
+    if _argc >= 3 {
+        return Call3D("play_motion", _argv[0], _argv[1], _argv[2])
+    }
+    if _argc == 2 {
+        return Call3D("play_motion", _argv[0], _argv[1])
+    }
+    return Call3D("play_motion", _argv[0])
+}
+
+Stop3DMotion
+{
+    return Call3D("stop_motion")
+}
+
+Set3DMorph
+{
+    if _argc >= 2 {
+        return Call3D("set_morph", _argv[0], _argv[1])
+    }
+    return Call3D("set_morph", _argv[0])
+}
+
+Reset3DMorph
+{
+    if _argc >= 1 {
+        return Call3D("reset_morph", _argv[0])
+    }
+    return Call3D("reset_morph")
+}
+
+Status3D
+{
+    return Call3D("status")
+}
+
+Shutdown3D
+{
+    return Call3D("shutdown")
+}
+
+Move3DTo
+{
+    return Call3D("move_to", _argv[0], _argv[1], _argv[2], _argv[3], _argv[4], _argv[5])
+}
+
+Move3DToNextMonitor
+{
+    return Call3D("move_to", "", "", _argv[0], _argv[1], _argv[2], "", 1)
+}
+
+Stop3DMove
+{
+    return Call3D("stop_move")
+}
+
+Sit3DOnWindow
+{
+    return Call3D("sit_on_window", _argv[0], _argv[1], _argv[2], _argv[3], _argv[4], _argv[5])
+}
+
+Stand3DUp
+{
+    return Call3D("stand_up")
+}
+
+Set3DAutoBehavior
+{
+    return Call3D("set_auto_behavior", _argv[0], _argv[1], _argv[2], _argv[3], _argv[4], _argv[5], _argv[6], _argv[7])
+}
+
+Set3DCrossMonitor
+{
+    return Call3D("set_cross_monitor", _argv[0])
+}
+
+Set3DTopmost
+{
+    return Call3D("set_topmost", _argv[0])
+}
+
+Configure3DGrab
+{
+    return Call3D("configure_grab", _argv[0], _argv[1], _argv[2])
+}
+
+// 着席位置の調整（モデルごと）。空の引数は現在の値のまま。
+//   Configure3DSeat(基準ボーン, 左右補正, 上下補正, 向き(度), 端からの距離(px), 遷移(ms), 接地ボーン "a,b", 接地を使う 1/0, 初期化 1/0)
+Configure3DSeat
+{
+    return Call3D("configure_seat", _argv[0], _argv[1], _argv[2], _argv[3], _argv[4], _argv[5], _argv[6], _argv[7], _argv[8])
+}
+
+Get3DBehaviorStatus
+{
+    return Call3D("get_behavior_status")
+}
+
+List3DWindows
+{
+    return Call3D("list_windows")
+}

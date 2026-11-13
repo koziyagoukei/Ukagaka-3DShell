@@ -1,0 +1,129 @@
+// Phase 2 の共通デスクトップ行動メニュー
+
+DesktopMenu
+{
+    _menu = "\n\q[歩く,OnUk3dWalk]　\q[移動停止,OnUk3dStopMove]"
+    _menu += "\n\q[手前の窓に座る,OnUk3dSit]　\q[立つ,OnUk3dStand]"
+    _menu += "\n自律行動　\q[ON,OnUk3dAutoOn]　\q[OFF,OnUk3dAutoOff]"
+    _menu += "\n画面またぎ　\q[ON,OnUk3dCrossOn]　\q[OFF,OnUk3dCrossOff]"
+    _menu += "\n\q[別の画面へ歩く,OnUk3dNextMonitor]　\q[戻る,OnUk3dDesktopBack]"
+    _menu += "\n常に最前面　\q[ON,OnUk3dTopmostOn]　\q[OFF,OnUk3dTopmostOff]"
+    "\![set,choicetimeout,0]\0\s[0]" + _argv[0] + _menu + "\e"
+}
+
+OnUk3dDesktop
+{
+    DesktopMenu("デスクトップ行動")
+}
+
+// 歩行速度（物理ピクセル/秒）。walk.vmd は 96dpi で 180px/s のときに足が滑らないように
+// 作ってあるので、3D ウィンドウと同じく画面の拡大率に合わせて速くする。
+Uk3dWalkSpeed
+{
+    _dpi = 96
+    if Get3DBehaviorStatus() == 1 {
+        _pos = STRSTR(uk3d.detail, '"dpi":', 0)
+        if _pos >= 0 {
+            _digits = ""
+            for _i = _pos + 6 ; _i < STRLEN(uk3d.detail) ; _i++ {
+                _c = SUBSTR(uk3d.detail, _i, 1)
+                if STRSTR("0123456789", _c, 0) < 0 {
+                    break
+                }
+                _digits += _c
+            }
+            if _digits != "" {
+                _dpi = TOINT(_digits)
+            }
+        }
+    }
+    180 * _dpi / 96
+}
+
+OnUk3dWalk
+{
+    if Move3DTo("", "", Uk3dWalkSpeed(), "walk", "idle", 0) == 0 {
+        return DesktopMenu(uk3d.error)
+    }
+    DesktopMenu("歩きます。")
+}
+
+OnUk3dStopMove
+{
+    if Stop3DMove() == 0 {
+        return DesktopMenu(uk3d.error)
+    }
+    DesktopMenu("止まりました。")
+}
+
+OnUk3dSit
+{
+    if Sit3DOnWindow("foreground", "top-center", "sit", "idle", "", 0) == 0 {
+        return DesktopMenu(uk3d.error)
+    }
+    DesktopMenu("ひと休み。")
+}
+
+OnUk3dStand
+{
+    if Stand3DUp() == 0 {
+        return DesktopMenu(uk3d.error)
+    }
+    DesktopMenu("立ち上がりました。")
+}
+
+OnUk3dAutoOn
+{
+    if Set3DAutoBehavior(1, 10, Uk3dWalkSpeed(), "walk", "idle", "sit", 0.2, 0) == 0 {
+        return DesktopMenu(uk3d.error)
+    }
+    DesktopMenu("自律行動を ON にしました。")
+}
+
+OnUk3dAutoOff
+{
+    if Set3DAutoBehavior(0, "", "", "", "", "", "", "") == 0 {
+        return DesktopMenu(uk3d.error)
+    }
+    DesktopMenu("自律行動を OFF にしました。")
+}
+
+OnUk3dCrossOn
+{
+    if Set3DCrossMonitor(1) == 0 {
+        return DesktopMenu(uk3d.error)
+    }
+    DesktopMenu("画面またぎを ON にしました。")
+}
+
+OnUk3dCrossOff
+{
+    if Set3DCrossMonitor(0) == 0 {
+        return DesktopMenu(uk3d.error)
+    }
+    DesktopMenu("画面またぎを OFF にしました。")
+}
+
+OnUk3dNextMonitor
+{
+    if Move3DToNextMonitor(Uk3dWalkSpeed(), "walk", "idle") == 0 {
+        return DesktopMenu(uk3d.error)
+    }
+    DesktopMenu("別の画面へ歩きます。")
+}
+
+OnUk3dTopmostOn
+{
+    if Set3DTopmost(1) == 0 {
+        return DesktopMenu(uk3d.error)
+    }
+    DesktopMenu("常に最前面を ON にしました。")
+}
+
+OnUk3dTopmostOff
+{
+    if Set3DTopmost(0) == 0 {
+        return DesktopMenu(uk3d.error)
+    }
+    DesktopMenu("常に最前面を OFF にしました。")
+}
