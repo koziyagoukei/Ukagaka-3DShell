@@ -98,7 +98,7 @@ API リファレンス：[SAORI と IPC](docs/ipc-protocol.md) · [デスクト�
 
 ## 不具合の報告
 
-[GitHub の Issues](https://github.com/koziyagoukei/Uka-3D-Shell/issues) に、次の内容を添えて報告してください。
+[GitHub の Issues](https://github.com/koziyagoukei/Ukagaka-3DShell/issues) に、次の内容を添えて報告してください。
 
 - Windows のバージョン、GPU、画面の拡大率と画面の数
 - SSP と SHIORI（YAYA など）のバージョン

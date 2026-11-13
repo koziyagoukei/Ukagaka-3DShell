@@ -32,5 +32,5 @@
 このゴーストとランタイムは非公式のプロジェクトで、うかの公式とは関係ありません。
 
 ■ 不具合の報告
-https://github.com/koziyagoukei/Uka-3D-Shell/issues
+https://github.com/koziyagoukei/Ukagaka-3DShell/issues
 （ukagaka3d_runtime.log と ukagaka3d_saori.log を添えてください。ghost\master にあります）

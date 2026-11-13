@@ -71,7 +71,7 @@ bin\uka3d_motiongen.exe   PMX に合わせて待機・歩行・着席・つま�
 yaya\ukagaka3d.dic        YAYA から 3D を操作する関数（Launch3D、Play3DMotion など）
 
 使い方は ghost-template の docs\author-guide\ と、
-https://github.com/koziyagoukei/Uka-3D-Shell を参照してください。
+https://github.com/koziyagoukei/Ukagaka-3DShell を参照してください。
 VC++ 再頒布可能パッケージなどの追加インストールは不要です（MSVC ランタイムは静的リンク）。
 ライセンス：MIT（LICENSE.txt）。第三者ソフトウェアは THIRD_PARTY_NOTICES.md。
 "@
